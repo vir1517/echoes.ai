@@ -1,1 +1,5 @@
-// Flows will be imported for their side effects in this file.
+import { config } from 'dotenv';
+config();
+
+import '@/ai/flows/conversational-persona-interaction.ts';
+import '@/ai/flows/media-to-persona-generation.ts';
