@@ -1,151 +1,236 @@
-
 "use client";
 
-import { useParams } from 'next/navigation';
-import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
+import { useState, useRef, useEffect } from 'react';
 import { MOCK_LOVED_ONES } from '@/lib/mock-data';
 import { Button } from "@/components/ui/button";
-import { Mic, Image as ImageIcon, FileText, Video, ArrowLeft, History, Heart } from "lucide-react";
+import { Mic, ArrowLeft, History, Heart, Share2, Calendar, MapPin, Sparkles, BookOpen } from "lucide-react";
 import Image from 'next/image';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { EchoOrb } from '@/components/echo-orb';
+import { conversationalPersonaInteraction } from '@/ai/flows/conversational-persona-interaction';
+import { useToast } from "@/hooks/use-toast";
 
 export default function ProfileDetail() {
   const { id } = useParams();
+  const router = useRouter();
+  const { toast } = useToast();
   const person = MOCK_LOVED_ONES.find(p => p.id === id);
+
+  const [activeTab, setActiveTab] = useState("story");
+  const [orbState, setOrbState] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
+  const [lastResponse, setLastResponse] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   if (!person) return <div>Profile not found</div>;
 
+  const handleSpeak = async () => {
+    if (orbState === 'listening') {
+      setOrbState('thinking');
+      try {
+        const result = await conversationalPersonaInteraction({
+          personaId: person.id,
+          userInputText: "Tell me about your childhood",
+          conversationHistory: []
+        });
+
+        setLastResponse(result.responseText);
+        if (result.responseAudioDataUri) {
+          const audio = new Audio(result.responseAudioDataUri);
+          audioRef.current = audio;
+          audio.onended = () => {
+            setOrbState('idle');
+            setLastResponse(null);
+          };
+          setOrbState('speaking');
+          await audio.play();
+        }
+      } catch (error) {
+        setOrbState('idle');
+        toast({ title: "Memory stream disconnected", variant: "destructive" });
+      }
+    } else {
+      setOrbState('listening');
+    }
+  };
+
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="h-16 px-6 border-b border-white/5 flex items-center justify-between glass sticky top-0 z-50">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild>
-            <Link href="/dashboard">
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
+    <div className={`min-h-screen flex flex-col transition-colors duration-1000 ${activeTab === 'speak' ? 'bg-background' : 'bg-background'}`}>
+      <header className="h-20 px-8 flex items-center justify-between glass sticky top-0 z-50">
+        <div className="flex items-center gap-6">
+          <Button variant="ghost" size="icon" onClick={() => router.push('/')} className="rounded-full">
+            <ArrowLeft className="w-5 h-5" />
           </Button>
-          <div className="flex items-center gap-3">
-            <h2 className="font-bold">{person.name}</h2>
+          <div className="flex flex-col">
+            <h2 className="font-bold text-lg">{person.name}</h2>
+            <span className="text-[10px] font-bold text-accent uppercase tracking-widest">{person.relation}</span>
           </div>
         </div>
         <div className="flex items-center gap-3">
-           <Button variant="outline" size="sm" className="border-white/10">
-            <History className="w-4 h-4 mr-2" /> Logs
+           <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-white">
+            <Share2 className="w-4 h-4" />
           </Button>
-          <Button className="bg-accent text-accent-foreground hover:bg-accent/90" size="sm" asChild>
-            <Link href={`/profile/${person.id}/chat`}>
-              <Mic className="w-4 h-4 mr-2" /> Speak with {person.name.split(' ')[0]}
-            </Link>
+          <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-white">
+            <History className="w-4 h-4" />
           </Button>
         </div>
       </header>
 
-      <main className="flex-1">
-        <div className="max-w-6xl mx-auto px-6 py-12">
-          <div className="grid md:grid-cols-3 gap-12">
-            {/* Sidebar info */}
-            <div className="space-y-8">
-              <div className="relative aspect-square rounded-3xl overflow-hidden border-2 border-primary shadow-2xl">
-                <Image 
-                  src={person.avatarUrl} 
-                  alt={person.name} 
-                  fill 
-                  className="object-cover"
-                  data-ai-hint="portrait elderly"
-                />
-              </div>
-              <div className="space-y-4">
-                <div className="space-y-1">
-                  <span className="text-xs font-bold text-accent uppercase tracking-widest">{person.relation}</span>
-                  <h1 className="text-3xl font-bold">{person.name}</h1>
-                  <p className="text-muted-foreground">{person.birthYear} — {person.passingYear}</p>
-                </div>
-                <p className="text-sm leading-relaxed text-muted-foreground bg-white/5 p-4 rounded-xl border border-white/5 italic">
-                  "{person.summary}"
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {person.traits.map(trait => (
-                    <span key={trait} className="px-3 py-1 rounded-full bg-primary text-xs font-medium">
-                      {trait}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-6 rounded-2xl bg-accent/5 border border-accent/20 space-y-4">
-                <div className="flex items-center gap-2 text-accent">
-                  <Heart className="w-5 h-5" />
-                  <h4 className="font-bold">Echo Readiness</h4>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">Persona Fidelity</span>
-                    <span className="text-accent font-bold">94%</span>
-                  </div>
-                  <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                    <div className="h-full bg-accent w-[94%]" />
-                  </div>
-                </div>
-                <p className="text-[10px] text-muted-foreground">
-                  The AI model has processed 42 memories and 18 minutes of voice data to reconstruct this persona.
-                </p>
-              </div>
-            </div>
-
-            {/* Memory Bank */}
-            <div className="md:col-span-2 space-y-8">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold">Memory Bank</h2>
-                <Button variant="ghost" className="text-accent text-sm hover:text-accent hover:bg-accent/10">Add Memory</Button>
-              </div>
-
-              <Tabs defaultValue="photos" className="w-full">
-                <TabsList className="bg-white/5 w-full justify-start p-1 h-auto border border-white/5 mb-6">
-                  <TabsTrigger value="photos" className="data-[state=active]:bg-primary"><ImageIcon className="w-4 h-4 mr-2" /> Photos</TabsTrigger>
-                  <TabsTrigger value="videos" className="data-[state=active]:bg-primary"><Video className="w-4 h-4 mr-2" /> Videos</TabsTrigger>
-                  <TabsTrigger value="documents" className="data-[state=active]:bg-primary"><FileText className="w-4 h-4 mr-2" /> Letters</TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="photos" className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  {[...Array(6)].map((_, i) => (
-                    <div key={i} className="aspect-square relative rounded-xl overflow-hidden group border border-white/5 cursor-pointer">
-                      <Image 
-                        src={`https://picsum.photos/seed/mem-${i}/400/400`} 
-                        alt="Memory" 
-                        fill 
-                        className="object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
-                        data-ai-hint="old photo"
-                      />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
-                        <span className="text-[10px] text-white/80 font-medium">Summer 1974</span>
-                      </div>
-                    </div>
-                  ))}
-                </TabsContent>
-                
-                <TabsContent value="videos" className="p-12 text-center border-2 border-dashed border-white/5 rounded-2xl text-muted-foreground">
-                  No video recordings uploaded yet.
-                </TabsContent>
-
-                <TabsContent value="documents" className="space-y-4">
-                  {[...Array(3)].map((_, i) => (
-                    <div key={i} className="p-4 bg-white/5 border border-white/5 rounded-xl flex items-center justify-between hover:bg-white/10 transition-colors cursor-pointer">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-primary/20 rounded flex items-center justify-center text-accent">
-                          <FileText className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-sm">Handwritten Letter to Emily</p>
-                          <p className="text-[10px] text-muted-foreground">Uploaded March 12, 2024 • 1.2MB</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </TabsContent>
-              </Tabs>
-            </div>
+      <main className="flex-1 flex flex-col">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex-1 flex flex-col">
+          <div className="flex justify-center py-6 bg-background">
+            <TabsList className="bg-white/5 rounded-full p-1 border border-white/5 h-12">
+              <TabsTrigger value="story" className="rounded-full px-8 data-[state=active]:bg-primary data-[state=active]:text-white">
+                <BookOpen className="w-4 h-4 mr-2" /> Their Story
+              </TabsTrigger>
+              <TabsTrigger value="speak" className="rounded-full px-8 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground">
+                <Mic className="w-4 h-4 mr-2" /> Speak With Them
+              </TabsTrigger>
+            </TabsList>
           </div>
-        </div>
+
+          <TabsContent value="story" className="flex-1 max-w-7xl mx-auto w-full px-8 py-8 animate-in fade-in duration-700">
+            <div className="grid md:grid-cols-3 gap-16">
+              {/* Sidebar Info */}
+              <div className="space-y-12">
+                <div className="relative aspect-[4/5] rounded-[2.5rem] overflow-hidden border-2 border-primary shadow-2xl group">
+                  <Image 
+                    src={person.avatarUrl} 
+                    alt={person.name} 
+                    fill 
+                    className="object-cover grayscale group-hover:grayscale-0 transition-all duration-1000"
+                    data-ai-hint="portrait elderly"
+                  />
+                </div>
+                
+                <div className="space-y-8">
+                  <div className="space-y-4">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Snapshot</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3 text-muted-foreground">
+                        <Calendar className="w-4 h-4 text-primary" />
+                        <span className="text-sm">{person.birthYear} — {person.passingYear}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-muted-foreground">
+                        <MapPin className="w-4 h-4 text-primary" />
+                        <span className="text-sm">Born in {person.birthPlace}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-muted-foreground">
+                        <Sparkles className="w-4 h-4 text-primary" />
+                        <span className="text-sm">{person.occupation}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Common Phrases</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {person.phrases.map(phrase => (
+                        <span key={phrase} className="px-4 py-2 rounded-xl bg-primary/10 border border-white/5 text-sm italic">
+                          "{phrase}"
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Main Content */}
+              <div className="md:col-span-2 space-y-16">
+                <section className="space-y-6">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Biography</h3>
+                  <p className="text-2xl font-medium leading-relaxed text-white/90 italic">
+                    {person.summary}
+                  </p>
+                </section>
+
+                <section className="space-y-8">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Life Timeline</h3>
+                  <div className="space-y-8 relative">
+                    <div className="absolute top-0 bottom-0 left-4 w-px bg-white/5" />
+                    {person.events.map((event, i) => (
+                      <div key={i} className="flex gap-8 relative">
+                        <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center shrink-0 border-4 border-background z-10">
+                          <div className="w-2 h-2 rounded-full bg-accent" />
+                        </div>
+                        <div className="space-y-1 pt-1">
+                          <span className="text-xs font-bold text-accent">{event.year}</span>
+                          <h4 className="font-bold text-xl">{event.title}</h4>
+                          <p className="text-muted-foreground">{event.description}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="space-y-8">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Memory Bank</h3>
+                    <Button variant="link" className="text-accent text-xs p-0">View All</Button>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-6">
+                    {[...Array(6)].map((_, i) => (
+                      <div key={i} className="aspect-square relative rounded-3xl overflow-hidden border border-white/5 hover:scale-[1.05] transition-all duration-500 cursor-pointer group">
+                        <Image 
+                          src={`https://picsum.photos/seed/mem-${i+10}/400/400`} 
+                          alt="Memory" 
+                          fill 
+                          className="object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
+                          data-ai-hint="old family photo"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="speak" className="flex-1 flex flex-col items-center justify-center relative bg-background animate-in zoom-in-95 duration-1000">
+            {/* Sacred Minimal Interface */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden">
+               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-accent/5 rounded-full blur-[150px] opacity-40" />
+            </div>
+
+            <div className="z-10 flex flex-col items-center gap-16 max-w-md text-center">
+              <EchoOrb state={orbState} />
+              
+              <div className="h-32 flex items-center justify-center">
+                {orbState === 'idle' && (
+                  <p className="text-muted-foreground/60 text-sm tracking-widest uppercase font-medium">Tap to begin speaking</p>
+                )}
+                {orbState === 'listening' && (
+                  <p className="text-accent text-lg font-bold animate-pulse tracking-widest uppercase">Listening...</p>
+                )}
+                {orbState === 'thinking' && (
+                  <p className="text-muted-foreground italic text-lg animate-pulse">Recalling memories...</p>
+                )}
+                {orbState === 'speaking' && lastResponse && (
+                  <p className="text-2xl text-white/90 font-medium italic leading-relaxed animate-in fade-in slide-in-from-bottom-4 duration-1000">
+                    "{lastResponse}"
+                  </p>
+                )}
+              </div>
+
+              <button 
+                onClick={handleSpeak}
+                disabled={orbState === 'thinking' || orbState === 'speaking'}
+                className={cn(
+                  "w-24 h-24 rounded-full flex items-center justify-center transition-all duration-500 border-2",
+                  orbState === 'listening' ? "bg-accent border-accent text-accent-foreground scale-110 shadow-[0_0_50px_rgba(255,191,0,0.4)]" : "bg-white/5 border-white/10 text-white hover:bg-white/10"
+                )}
+              >
+                <Mic className={cn("w-10 h-10", orbState === 'listening' && "animate-pulse")} />
+              </button>
+            </div>
+
+            <div className="absolute bottom-12 left-0 right-0 text-center px-8">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] opacity-40">
+                Responses are woven from their own words, stories, and memories — not invented.
+              </p>
+            </div>
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   );

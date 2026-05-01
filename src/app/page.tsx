@@ -1,81 +1,84 @@
-
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
-import { Mic, Heart, Users, ShieldCheck } from "lucide-react";
+import { Plus, Heart } from "lucide-react";
 import Image from 'next/image';
+import { MOCK_LOVED_ONES } from '@/lib/mock-data';
 
 export default function Home() {
   return (
-    <div className="flex flex-col min-h-screen">
-      <header className="px-6 lg:px-12 h-20 flex items-center justify-between border-b border-white/5">
-        <Link href="/" className="flex items-center gap-2">
-          <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center border border-accent/20">
-            <span className="text-accent font-bold text-xl">E</span>
-          </div>
-          <span className="text-2xl font-bold tracking-tight text-white">Echoes</span>
-        </Link>
-        <nav className="hidden md:flex gap-8">
-          <Link href="#features" className="text-sm font-medium hover:text-accent transition-colors">How it works</Link>
-          <Link href="/dashboard" className="text-sm font-medium hover:text-accent transition-colors">Profiles</Link>
-        </nav>
+    <div className="flex flex-col min-h-screen bg-background">
+      <header className="px-8 h-24 flex items-center justify-between">
+        <div className="flex flex-col">
+          <h1 className="text-3xl font-bold tracking-tighter text-white">Echoes</h1>
+          <p className="text-[10px] uppercase tracking-[0.3em] text-accent font-bold">Their voice. Forever.</p>
+        </div>
         <div className="flex items-center gap-4">
-          <Button variant="ghost" className="text-sm">Sign In</Button>
-          <Button className="bg-primary hover:bg-primary/80 text-white">Get Started</Button>
+          <Button variant="ghost" className="text-muted-foreground hover:text-white">Our Story</Button>
+          <div className="w-8 h-8 rounded-full bg-primary/20 border border-white/5" />
         </div>
       </header>
 
-      <main className="flex-1">
-        <section className="py-24 px-6 relative overflow-hidden">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-primary/20 rounded-full blur-[120px] -z-10" />
-          <div className="max-w-4xl mx-auto text-center space-y-8">
-            <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-white leading-tight">
-              Conversations that <span className="text-accent">Live Forever</span>
-            </h1>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              Echoes helps you create interactive, voice-driven memory profiles of loved ones. Preserve their voice, their stories, and their spirit for generations to come.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
-              <Button size="lg" className="h-14 px-8 text-lg bg-accent text-accent-foreground hover:bg-accent/90" asChild>
-                <Link href="/dashboard">Enter the Archive</Link>
-              </Button>
-              <Button size="lg" variant="outline" className="h-14 px-8 text-lg border-white/10 hover:bg-white/5">
-                Watch the Story
-              </Button>
-            </div>
+      <main className="flex-1 max-w-7xl mx-auto w-full px-8 py-12">
+        <div className="space-y-12">
+          <div className="max-w-2xl">
+            <h2 className="text-4xl font-bold text-white mb-4">Family Vault</h2>
+            <p className="text-muted-foreground text-lg italic">"Some people never truly leave."</p>
           </div>
-        </section>
 
-        <section id="features" className="py-24 bg-black/20">
-          <div className="max-w-6xl mx-auto px-6">
-            <div className="grid md:grid-cols-3 gap-12">
-              <div className="space-y-4 text-center p-6 rounded-2xl bg-white/5 border border-white/5">
-                <div className="w-12 h-12 bg-primary/40 rounded-xl flex items-center justify-center mx-auto text-accent">
-                  <Users className="w-6 h-6" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+            {MOCK_LOVED_ONES.map((person) => (
+              <Link 
+                key={person.id} 
+                href={`/profile/${person.id}`}
+                className="group relative bg-card/40 border border-white/5 rounded-[2rem] p-8 transition-all hover:bg-card/60 hover:border-accent/20 hover:scale-[1.02] duration-500"
+              >
+                <div className="flex flex-col items-center text-center space-y-6">
+                  <div className="relative w-40 h-40 rounded-full overflow-hidden border-4 border-primary group-hover:border-accent transition-colors duration-500 shadow-2xl">
+                    <Image 
+                      src={person.avatarUrl} 
+                      alt={person.name} 
+                      fill 
+                      className="object-cover grayscale group-hover:grayscale-0 transition-all duration-1000"
+                      data-ai-hint="portrait elderly"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-bold text-accent uppercase tracking-widest">{person.relation}</span>
+                    <h3 className="text-2xl font-bold text-white">{person.name}</h3>
+                    <p className="text-sm text-muted-foreground font-medium">
+                      {person.birthYear} — {person.passingYear}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 justify-center">
+                    {person.traits.slice(0, 2).map(trait => (
+                      <span key={trait} className="text-[9px] px-3 py-1 rounded-full bg-primary/20 text-white/50 border border-white/5 uppercase tracking-tighter">
+                        {trait}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-                <h3 className="text-xl font-bold">Family Archive</h3>
-                <p className="text-muted-foreground">Upload photos, letters, diaries, and videos to build a rich historical profile.</p>
+              </Link>
+            ))}
+
+            <Link 
+              href="/profile/new"
+              className="flex flex-col items-center justify-center p-8 rounded-[2rem] border-2 border-dashed border-white/5 bg-white/[0.02] hover:bg-white/[0.04] hover:border-accent/20 transition-all group min-h-[400px]"
+            >
+              <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center text-accent mb-6 group-hover:scale-110 transition-transform">
+                <Plus className="w-8 h-8" />
               </div>
-              <div className="space-y-4 text-center p-6 rounded-2xl bg-white/5 border border-white/5">
-                <div className="w-12 h-12 bg-primary/40 rounded-xl flex items-center justify-center mx-auto text-accent">
-                  <Heart className="w-6 h-6" />
-                </div>
-                <h3 className="text-xl font-bold">Soul Processing</h3>
-                <p className="text-muted-foreground">Our AI understands their humor, beliefs, and unique personality from your media.</p>
-              </div>
-              <div className="space-y-4 text-center p-6 rounded-2xl bg-white/5 border border-white/5">
-                <div className="w-12 h-12 bg-primary/40 rounded-xl flex items-center justify-center mx-auto text-accent">
-                  <Mic className="w-6 h-6" />
-                </div>
-                <h3 className="text-xl font-bold">Voice Synthesis</h3>
-                <p className="text-muted-foreground">Hear them speak again with a reconstructed voice that captures every nuance.</p>
-              </div>
-            </div>
+              <h3 className="text-xl font-bold text-white">Add Someone</h3>
+              <p className="text-sm text-muted-foreground mt-2 text-center max-w-[200px]">Begin preserving their story and spirit.</p>
+            </Link>
           </div>
-        </section>
+        </div>
       </main>
 
-      <footer className="py-12 border-t border-white/5 text-center text-sm text-muted-foreground">
-        <p>© 2024 Echoes Memory Platforms. Dedicated to the stories that make us who we are.</p>
+      <footer className="py-12 px-8 flex flex-col items-center gap-4 text-center">
+        <Heart className="w-5 h-5 text-accent/40" />
+        <p className="text-[10px] text-muted-foreground uppercase tracking-widest max-w-xs leading-loose">
+          Echoes is a space of remembrance. Every profile is private, secure, and shared only with family.
+        </p>
       </footer>
     </div>
   );
