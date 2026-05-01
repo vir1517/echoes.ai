@@ -16,7 +16,7 @@ export const getPuter = () => {
   return null;
 };
 
-const STORAGE_KEY = 'echo_profiles_v4';
+const STORAGE_KEY = 'echo_profiles_v10'; // Incremented version for stability
 
 /**
  * Saves a profile to Puter KV storage with LocalStorage as a primary source of truth.
@@ -39,7 +39,7 @@ export async function saveProfileToPuter(profileData: any) {
       
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
       
-      // Dispatch events for synchronization
+      // Dispatch events for cross-tab synchronization
       window.dispatchEvent(new Event('storage'));
       window.dispatchEvent(new CustomEvent('profile-updated'));
     } catch (e) {
@@ -47,7 +47,7 @@ export async function saveProfileToPuter(profileData: any) {
     }
   }
 
-  // 2. Sync with Puter KV in the background
+  // 2. Sync with Puter KV in the background if available
   if (p && p.kv) {
     try {
       const stored = await p.kv.get('echo_profiles');
@@ -61,7 +61,6 @@ export async function saveProfileToPuter(profileData: any) {
       }
       
       await p.kv.set('echo_profiles', profiles);
-      return true;
     } catch (error) {
       console.warn("Puter KV sync failed:", error);
     }
@@ -77,7 +76,7 @@ export async function getProfilesFromPuter() {
   const p = getPuter();
   let localProfiles = [];
 
-  // Get local profiles first
+  // Get local profiles first - this is the primary source of truth for current session
   if (typeof window !== 'undefined') {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -87,7 +86,7 @@ export async function getProfilesFromPuter() {
     }
   }
   
-  // If Puter is available, try to get cloud profiles and merge
+  // Attempt to sync from cloud
   if (p && p.kv) {
     try {
       const cloudProfilesRaw = await p.kv.get('echo_profiles');
@@ -95,21 +94,23 @@ export async function getProfilesFromPuter() {
         ? cloudProfilesRaw 
         : (typeof cloudProfilesRaw === 'string' ? JSON.parse(cloudProfilesRaw) : []);
       
-      // Merge cloud and local, cloud wins if conflicts exist
-      const mergedMap = new Map();
-      localProfiles.forEach((pr: any) => mergedMap.set(pr.id, pr));
-      cloudProfiles.forEach((pr: any) => mergedMap.set(pr.id, pr));
-      
-      const merged = Array.from(mergedMap.values());
-      
-      // Sync merged back to local for consistency
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      if (cloudProfiles.length > 0) {
+        // Merge cloud and local, favoring cloud version for identical IDs but keeping local-only items
+        const mergedMap = new Map();
+        localProfiles.forEach((pr: any) => mergedMap.set(pr.id, pr));
+        cloudProfiles.forEach((pr: any) => mergedMap.set(pr.id, pr));
+        
+        const merged = Array.from(mergedMap.values());
+        
+        // Sync merged back to local if it changed
+        if (typeof window !== 'undefined' && JSON.stringify(merged) !== JSON.stringify(localProfiles)) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+        }
+        
+        return merged;
       }
-      
-      return merged;
     } catch (error) {
-      console.warn("Puter KV fetch failed, using local only:", error);
+      console.warn("Puter KV fetch failed, using local only.");
     }
   }
   

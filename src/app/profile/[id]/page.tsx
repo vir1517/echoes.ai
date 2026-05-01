@@ -23,6 +23,7 @@ export default function ProfileDetail() {
   const [activeTab, setActiveTab] = useState("story");
   const [orbState, setOrbState] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
   const [lastResponse, setLastResponse] = useState<string | null>(null);
+  const [userInput, setUserInput] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'model', content: string}[]>([]);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -48,9 +49,10 @@ export default function ProfileDetail() {
     load();
   }, [id, router, toast]);
 
-  const handleAIResponse = useCallback(async (userInput: string) => {
+  const handleAIResponse = useCallback(async (text: string) => {
     if (!person) return;
     
+    setUserInput(text);
     setOrbState('thinking');
     
     try {
@@ -62,13 +64,13 @@ export default function ProfileDetail() {
           traits: person.traits || [],
           phrases: person.phrases || [],
         },
-        userInputText: userInput,
+        userInputText: text,
         conversationHistory: chatHistory
       });
 
       const newHistory = [
         ...chatHistory, 
-        { role: 'user' as const, content: userInput },
+        { role: 'user' as const, content: text },
         { role: 'model' as const, content: result.responseText }
       ];
       setChatHistory(newHistory);
@@ -124,6 +126,8 @@ export default function ProfileDetail() {
 
         recognition.onstart = () => {
           setOrbState('listening');
+          setLastResponse(null);
+          setUserInput(null);
         };
 
         recognition.onresult = (event: any) => {
@@ -142,13 +146,14 @@ export default function ProfileDetail() {
           if (event.error === 'not-allowed') {
             toast({ 
               title: "Microphone Access Denied", 
-              description: "Please enable microphone permissions to speak.", 
+              description: "Please enable microphone permissions in your browser settings to speak.", 
               variant: "destructive" 
             });
           }
         };
 
         recognition.onend = () => {
+          // If we haven't moved to thinking or speaking, reset to idle
           setOrbState(prev => (prev === 'listening' ? 'idle' : prev));
         };
 
@@ -173,7 +178,7 @@ export default function ProfileDetail() {
       if (!recognitionRef.current) {
         toast({ 
           title: "Speech Not Supported", 
-          description: "Your browser doesn't support voice recognition. Try Chrome or Safari.", 
+          description: "Your browser doesn't support voice recognition. Please try Chrome or Safari.", 
           variant: "destructive" 
         });
         return;
@@ -183,7 +188,6 @@ export default function ProfileDetail() {
         audioRef.current.pause();
       }
 
-      setLastResponse(null);
       setOrbState('listening');
       
       try {
@@ -196,12 +200,9 @@ export default function ProfileDetail() {
   };
 
   if (!person) return (
-    <div className="min-h-screen flex flex-col items-center justify-center space-y-8 bg-background">
-      <div className="relative">
-        <div className="absolute inset-0 bg-accent/20 rounded-full blur-3xl animate-pulse" />
-        <div className="w-20 h-20 border-4 border-accent/20 border-t-accent rounded-full animate-spin relative" />
-      </div>
-      <p className="text-muted-foreground font-bold tracking-[0.3em] uppercase animate-pulse">Entering the Vault</p>
+    <div className="min-h-screen flex flex-col items-center justify-center bg-background">
+      <div className="relative w-20 h-20 border-4 border-accent/20 border-t-accent rounded-full animate-spin" />
+      <p className="mt-8 text-muted-foreground font-bold tracking-[0.3em] uppercase animate-pulse">Entering the Vault</p>
     </div>
   );
 
@@ -320,23 +321,6 @@ export default function ProfileDetail() {
                     </div>
                   </section>
                 )}
-
-                <section className="space-y-10 pb-20">
-                  <h3 className="text-xs font-bold uppercase tracking-[0.3em] text-accent">Memory Bank</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-8">
-                    {[...Array(6)].map((_, i) => (
-                      <div key={i} className="aspect-square relative rounded-[2.5rem] overflow-hidden border border-white/5 hover:scale-[1.05] transition-all duration-700 cursor-pointer group shadow-2xl">
-                        <Image 
-                          src={`https://picsum.photos/seed/mem-${person.id}-${i}/600/600`} 
-                          alt="Memory" 
-                          fill 
-                          className="object-cover grayscale group-hover:grayscale-0 transition-all duration-1000" 
-                          data-ai-hint="old photo"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </section>
               </div>
             </div>
           </TabsContent>
@@ -346,7 +330,7 @@ export default function ProfileDetail() {
                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-accent/5 rounded-full blur-[200px] opacity-40 animate-pulse-slow" />
             </div>
 
-            <div className="z-10 flex flex-col items-center gap-20 max-w-3xl text-center px-10">
+            <div className="z-10 flex flex-col items-center gap-12 max-w-3xl text-center px-10">
               <EchoOrb state={orbState} />
               
               <div className="h-48 flex items-center justify-center w-full">
@@ -363,6 +347,7 @@ export default function ProfileDetail() {
                 )}
                 {orbState === 'thinking' && (
                   <div className="flex flex-col items-center gap-6">
+                    {userInput && <p className="text-white/40 text-lg italic mb-2">"{userInput}"</p>}
                     <p className="text-muted-foreground italic text-2xl font-medium">Recalling memories...</p>
                     <div className="flex gap-2">
                       <div className="w-2.5 h-2.5 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]" />
@@ -400,15 +385,6 @@ export default function ProfileDetail() {
                 )} />
                 <Mic className={cn("w-14 h-14 transition-all duration-700", orbState === 'listening' && "scale-110")} />
               </button>
-            </div>
-
-            <div className="absolute bottom-16 left-0 right-0 text-center px-12">
-              <div className="flex flex-col items-center gap-4 opacity-40 hover:opacity-100 transition-opacity duration-1000">
-                <Heart className="w-5 h-5 text-accent" />
-                <p className="text-[10px] text-muted-foreground uppercase tracking-[0.3em] max-w-md mx-auto leading-loose font-bold">
-                  Responses are woven from their own words and memories.
-                </p>
-              </div>
             </div>
           </TabsContent>
         </Tabs>
