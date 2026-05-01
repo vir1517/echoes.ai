@@ -1,4 +1,3 @@
-
 'use server';
 /**
  * @fileOverview This file implements a Genkit flow for processing various media types
@@ -12,9 +11,6 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 import {Part} from '@genkit-ai/ai'; // Import Part type for multimodal prompts
-
-// Increase the timeout for this specific server action to handle large media analysis
-export const maxDuration = 300; 
 
 // Input Schema
 const MediaToPersonaGenerationInputSchema = z.object({
