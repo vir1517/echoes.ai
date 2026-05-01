@@ -1,11 +1,10 @@
-
 "use client";
 
 import { useParams, useRouter } from 'next/navigation';
 import { useState, useRef, useEffect } from 'react';
 import { MOCK_LOVED_ONES, LovedOne } from '@/lib/mock-data';
 import { Button } from "@/components/ui/button";
-import { Mic, ArrowLeft, Share2, Calendar, MapPin, Sparkles, BookOpen, Quote, Heart, Info, Volume2 } from "lucide-react";
+import { Mic, ArrowLeft, Share2, Calendar, MapPin, Sparkles, BookOpen, Quote, Volume2, Heart } from "lucide-react";
 import Image from 'next/image';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EchoOrb } from '@/components/echo-orb';
@@ -48,7 +47,7 @@ export default function ProfileDetail() {
     load();
   }, [id, router, toast]);
 
-  // Initialize Web Speech API
+  // Initialize Web Speech API with better error handling and lifecycle management
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -59,18 +58,17 @@ export default function ProfileDetail() {
         recognition.interimResults = false;
         recognition.lang = 'en-US';
 
-        recognition.onresult = (event: any) => {
-          const transcript = event.results[0][0].transcript;
-          handleAIResponse(transcript);
-        };
-
         recognition.onstart = () => {
           setOrbState('listening');
         };
 
-        recognition.onend = () => {
-          // If we didn't move to thinking, go back to idle
-          setOrbState(prev => prev === 'listening' ? 'idle' : prev);
+        recognition.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          if (transcript) {
+            handleAIResponse(transcript);
+          } else {
+            setOrbState('idle');
+          }
         };
 
         recognition.onerror = (event: any) => {
@@ -82,7 +80,18 @@ export default function ProfileDetail() {
               description: "Please enable microphone permissions to speak.", 
               variant: "destructive" 
             });
+          } else if (event.error !== 'no-speech') {
+            toast({ 
+              title: "Recognition Error", 
+              description: `Something went wrong: ${event.error}`, 
+              variant: "destructive" 
+            });
           }
+        };
+
+        recognition.onend = () => {
+          // Only reset if we aren't processing a result
+          setOrbState(prev => (prev === 'listening' ? 'idle' : prev));
         };
 
         recognitionRef.current = recognition;
@@ -91,7 +100,7 @@ export default function ProfileDetail() {
 
     return () => {
       if (recognitionRef.current) {
-        recognitionRef.current.stop();
+        try { recognitionRef.current.stop(); } catch (e) {}
       }
       if (audioRef.current) {
         audioRef.current.pause();
@@ -105,14 +114,18 @@ export default function ProfileDetail() {
     setOrbState('thinking');
     
     try {
-      // Pass the existing history to maintain context
       const result = await conversationalPersonaInteraction({
         personaId: person.id,
+        personaContext: {
+          name: person.name,
+          summary: person.summary,
+          traits: person.traits || [],
+          phrases: person.phrases || [],
+        },
         userInputText: userInput,
         conversationHistory: chatHistory
       });
 
-      // Update history with both the user's input and AI's response
       const newHistory = [
         ...chatHistory, 
         { role: 'user' as const, content: userInput },
@@ -122,6 +135,10 @@ export default function ProfileDetail() {
       setLastResponse(result.responseText);
       
       if (result.responseAudioDataUri) {
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
+        
         const audio = new Audio(result.responseAudioDataUri);
         audioRef.current = audio;
         
@@ -150,7 +167,7 @@ export default function ProfileDetail() {
 
   const handleSpeak = () => {
     if (orbState === 'listening') {
-      recognitionRef.current?.stop();
+      try { recognitionRef.current?.stop(); } catch (e) {}
     } else {
       if (!recognitionRef.current) {
         toast({ 
@@ -165,6 +182,9 @@ export default function ProfileDetail() {
         audioRef.current.pause();
       }
 
+      setLastResponse(null);
+      setOrbState('listening');
+      
       try {
         recognitionRef.current.start();
       } catch (e) {

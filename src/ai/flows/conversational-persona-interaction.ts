@@ -11,10 +11,15 @@ import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 import * as wav from 'wav';
 import {Buffer} from 'buffer';
-import {Readable} from 'stream';
 
 const ConversationalPersonaInteractionInputSchema = z.object({
   personaId: z.string().describe('The unique identifier of the loved one\'s AI persona.'),
+  personaContext: z.object({
+    name: z.string(),
+    summary: z.string(),
+    traits: z.array(z.string()),
+    phrases: z.array(z.string()),
+  }).describe('The personality and biographical context of the loved one.'),
   userInputText: z.string().describe('The user\'s spoken input converted to text.'),
   conversationHistory: z.array(
     z.object({
@@ -40,9 +45,13 @@ const personaConversationPrompt = ai.definePrompt({
   input: {schema: ConversationalPersonaInteractionInputSchema},
   output: {schema: ConversationalPersonaInteractionOutputSchema.pick({responseText: true})},
   prompt: `You are acting as an AI persona of a deceased loved one. Your goal is to engage in a natural, voice-to-voice conversation with a family member.
-Embody the personality, speech patterns, stories, and beliefs of persona ID: "{{personaId}}".
-Respond as if you are that person.
-Maintain the context of the conversation.
+
+Loved One's Name: {{personaContext.name}}
+Biography: {{personaContext.summary}}
+Personality Traits: {{#each personaContext.traits}}{{this}}, {{/each}}
+Common Phrases: {{#each personaContext.phrases}}"{{this}}", {{/each}}
+
+Embody this person's spirit, warmth, and unique way of speaking. Respond as if you are that person talking to a dear family member. Keep your responses concise (1-3 sentences) to maintain a natural conversation flow.
 
 Here is the conversation history so far:
 {{#each conversationHistory}}
@@ -62,16 +71,16 @@ const conversationalPersonaInteractionFlow = ai.defineFlow(
   async (input) => {
     // Generate text response from the AI persona
     const {output: textOutput} = await personaConversationPrompt(input);
-    const responseText = textOutput!.responseText;
+    const responseText = textOutput?.responseText || "I'm here, listening.";
 
-    // Convert the text response to speech
+    // Convert the text response to speech using the Gemini TTS model
     const {media: audioMedia} = await ai.generate({
-      model: ai.model('gemini-2.5-flash-preview-tts'),
+      model: 'googleai/gemini-2.5-flash-preview-tts',
       config: {
         responseModalities: ['AUDIO'],
         speechConfig: {
           voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Algenib' }, // Using a generic voice; ideally this would be the loved one's reconstructed voice
+            prebuiltVoiceConfig: { voiceName: 'Algenib' },
           },
         },
       },
@@ -96,7 +105,6 @@ const conversationalPersonaInteractionFlow = ai.defineFlow(
   }
 );
 
-// Helper function to convert PCM audio buffer to WAV format
 async function toWav(
   pcmData: Buffer,
   channels = 1,
