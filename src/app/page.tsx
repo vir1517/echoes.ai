@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
-import { Heart, Sparkles, User, Settings, Plus } from "lucide-react";
+import { Heart, Sparkles, User, Settings, Plus, RefreshCw } from "lucide-react";
 import Image from 'next/image';
 import { LovedOne } from '@/lib/mock-data';
 import { useEffect, useState, useCallback } from 'react';
@@ -13,7 +13,8 @@ export default function Home() {
   const [profiles, setProfiles] = useState<LovedOne[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const loadProfiles = useCallback(async () => {
+  const loadProfiles = useCallback(async (showLoading = true) => {
+    if (showLoading) setIsLoading(true);
     try {
       const userProfiles = await getProfilesFromPuter();
       setProfiles(userProfiles);
@@ -27,17 +28,21 @@ export default function Home() {
   useEffect(() => {
     loadProfiles();
 
-    // Listen for storage events (cross-tab sync) and custom sync events (same-tab)
     const handleSync = () => {
-      loadProfiles();
+      loadProfiles(false);
     };
 
+    // Listen for storage changes (cross-tab)
     window.addEventListener('storage', handleSync);
+    // Listen for manual updates (same tab)
     window.addEventListener('profile-updated', handleSync);
+    // Refresh when user returns to this tab
+    window.addEventListener('focus', handleSync);
     
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('profile-updated', handleSync);
+      window.removeEventListener('focus', handleSync);
     };
   }, [loadProfiles]);
 
@@ -49,8 +54,13 @@ export default function Home() {
           <p className="text-[9px] uppercase tracking-[0.4em] text-accent/80 font-bold">Their voice. Forever.</p>
         </Link>
         <div className="flex items-center gap-6">
-          <Button variant="ghost" className="text-muted-foreground hover:text-white hidden md:flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-accent" /> Our Ethos
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => loadProfiles()} 
+            className="text-muted-foreground hover:text-accent gap-2"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} /> Sync
           </Button>
           <div className="h-4 w-px bg-white/10 hidden md:block" />
           <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-accent">
