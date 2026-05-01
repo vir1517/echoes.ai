@@ -4,26 +4,26 @@
 
 @layer base {
   :root {
-    --background: 20 10% 8%; /* Deep, warm dark */
+    --background: 276 10% 10%; /* Very dark, desaturated plum-grey #1A171C */
     --foreground: 0 0% 98%;
-    --card: 20 10% 12%;
+    --card: 276 10% 12%;
     --card-foreground: 0 0% 98%;
-    --popover: 20 10% 8%;
+    --popover: 276 10% 10%;
     --popover-foreground: 0 0% 98%;
-    --primary: 20 20% 25%; /* Warm wood/clay */
+    --primary: 271 27% 30%; /* Deep, thoughtful plum #4D3861 */
     --primary-foreground: 0 0% 98%;
-    --secondary: 20 10% 15%;
+    --secondary: 276 10% 15%;
     --secondary-foreground: 0 0% 98%;
-    --muted: 20 10% 15%;
-    --muted-foreground: 20 10% 65%;
-    --accent: 35 100% 70%; /* Warm amber/glow */
-    --accent-foreground: 20 10% 8%;
+    --muted: 276 10% 15%;
+    --muted-foreground: 276 5% 65%;
+    --accent: 180 70% 60%; /* Vibrant, cool turquoise #52E0E0 */
+    --accent-foreground: 276 10% 10%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 20 15% 15%;
-    --input: 20 15% 15%;
-    --ring: 35 100% 70%;
-    --radius: 1rem;
+    --border: 276 15% 15%;
+    --input: 276 15% 15%;
+    --ring: 180 70% 60%;
+    --radius: 1.5rem;
   }
 }
 
@@ -32,10 +32,10 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground font-body;
+    @apply bg-background text-foreground font-body antialiased;
   }
   h1, h2, h3, h4, h5, h6 {
-    @apply font-headline font-bold;
+    @apply font-headline font-bold tracking-tight;
   }
 }
 
@@ -93,4 +93,17 @@
 
 .orb-listening .orb-core {
   box-shadow: 0 0 100px hsla(var(--accent), 0.4);
+}
+
+.animate-pulse-slow {
+  animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes wave {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(2); }
+}
+
+.animate-wave {
+  animation: wave 1s infinite ease-in-out;
 }

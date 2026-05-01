@@ -11,12 +11,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { saveProfileToPuter } from '@/lib/puter';
 import { useToast } from "@/hooks/use-toast";
+import { mediaToPersonaGeneration } from '@/ai/flows/media-to-persona-generation';
 
 export default function CreateProfile() {
   const router = useRouter();
   const { toast } = useToast();
   const [step, setStep] = useState(1);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState("Weaving together their memories...");
+  
   const [formData, setFormData] = useState({
     name: '',
     birthYear: '',
@@ -34,24 +37,41 @@ export default function CreateProfile() {
     } else {
       setIsProcessing(true);
       
-      const newProfile = {
-        id: `profile-${Date.now()}`,
-        name: formData.name,
-        birthYear: parseInt(formData.birthYear) || 0,
-        passingYear: parseInt(formData.passingYear) || 0,
-        relation: formData.relation || 'Loved One',
-        avatarUrl: `https://picsum.photos/seed/${formData.name || 'new'}/400/400`,
-        traits: ['Newly Created', 'Family Echo'],
-        summary: formData.personality || 'A life remembered with love.',
-        birthPlace: formData.birthPlace || 'Unknown',
-        languages: ['English'],
-        occupation: 'Family Member',
-        phrases: formData.phrases ? formData.phrases.split(',').map(p => p.trim()) : [],
-        beliefs: [],
-        events: []
-      };
-
       try {
+        setProcessingStatus("Listening to their voice in recordings...");
+        // In a real app, we'd pass actual media URIs here. 
+        // For now, we pass the personality text as the primary source of context.
+        const personaData = await mediaToPersonaGeneration({
+          lovedOneName: formData.name,
+          textDocuments: [
+            `Personality: ${formData.personality}`,
+            `Memories: They were remembered for their ${formData.relation} role and phrases like "${formData.phrases}".`,
+            `Birthplace: ${formData.birthPlace}`
+          ]
+        });
+
+        setProcessingStatus("Finalizing their Echo...");
+
+        const newProfile = {
+          id: `profile-${Date.now()}`,
+          name: formData.name,
+          birthYear: parseInt(formData.birthYear) || 0,
+          passingYear: parseInt(formData.passingYear) || 0,
+          relation: formData.relation || 'Loved One',
+          avatarUrl: `https://picsum.photos/seed/${formData.name || 'new'}/400/400`,
+          traits: personaData.personalityTraits,
+          summary: personaData.overallSummary,
+          birthPlace: formData.birthPlace || 'Unknown',
+          languages: ['English'],
+          occupation: 'Family Member',
+          phrases: personaData.speakingStyle.commonPhrases.length > 0 
+            ? personaData.speakingStyle.commonPhrases 
+            : (formData.phrases ? formData.phrases.split(',').map(p => p.trim()) : []),
+          beliefs: personaData.keyBeliefs,
+          events: [], // Would be populated from a real timeline processing
+          exampleDialogues: personaData.exampleDialogues
+        };
+
         const success = await saveProfileToPuter(newProfile);
         
         if (success) {
@@ -61,21 +81,16 @@ export default function CreateProfile() {
           });
           router.push('/');
         } else {
-          toast({
-            title: "Cloud Sync Error",
-            description: "We couldn't reach the cloud to save this profile. Please try again.",
-            variant: "destructive"
-          });
-          setIsProcessing(false);
+          throw new Error("Puter save failed");
         }
       } catch (err) {
         console.error("Error creating profile:", err);
-        setIsProcessing(false);
         toast({
-          title: "System Error",
-          description: "An unexpected error occurred. Please refresh and try again.",
+          title: "Processing Error",
+          description: "We encountered a hiccup while learning about them. Please try again.",
           variant: "destructive"
         });
+        setIsProcessing(false);
       }
     }
   };
@@ -106,7 +121,7 @@ export default function CreateProfile() {
           {steps.map((s) => (
             <div key={s.id} className="flex flex-col items-center gap-3">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-500 ${
-                step >= s.id ? 'bg-accent text-accent-foreground scale-110 shadow-[0_0_15px_rgba(255,191,0,0.3)]' : 'bg-white/5 text-muted-foreground'
+                step >= s.id ? 'bg-accent text-accent-foreground scale-110 shadow-[0_0_15px_rgba(82,224,224,0.3)]' : 'bg-white/5 text-muted-foreground'
               }`}>
                 {step > s.id ? <Check className="w-4 h-4" /> : s.id}
               </div>
@@ -128,9 +143,7 @@ export default function CreateProfile() {
             <div className="space-y-4 max-w-md">
               <h2 className="text-3xl font-bold">Building their Echo</h2>
               <div className="space-y-2 text-muted-foreground italic">
-                <p className="animate-pulse">Listening to their voice in recordings...</p>
-                <p className="animate-pulse [animation-delay:1s]">Learning how they saw the world from your stories...</p>
-                <p className="animate-pulse [animation-delay:2s]">Weaving together their memories...</p>
+                <p className="animate-pulse">{processingStatus}</p>
               </div>
             </div>
           </div>
@@ -180,12 +193,12 @@ export default function CreateProfile() {
                         <SelectValue placeholder="Select relationship" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="grandfather">Grandfather</SelectItem>
-                        <SelectItem value="grandmother">Grandmother</SelectItem>
-                        <SelectItem value="father">Father</SelectItem>
-                        <SelectItem value="mother">Mother</SelectItem>
-                        <SelectItem value="spouse">Spouse</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
+                        <SelectItem value="Grandfather">Grandfather</SelectItem>
+                        <SelectItem value="Grandmother">Grandmother</SelectItem>
+                        <SelectItem value="Father">Father</SelectItem>
+                        <SelectItem value="Mother">Mother</SelectItem>
+                        <SelectItem value="Spouse">Spouse</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -323,16 +336,6 @@ export default function CreateProfile() {
                   <p className="text-muted-foreground leading-relaxed italic border-l-2 border-accent/40 pl-6 py-2">
                     "{formData.personality || 'She was a force of nature, always in the garden or at the easel...'}"
                   </p>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 bg-black/20 rounded-xl">
-                      <p className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Memories Shared</p>
-                      <p className="font-bold">24 Photos & Videos</p>
-                    </div>
-                    <div className="p-4 bg-black/20 rounded-xl">
-                      <p className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Voice Quality</p>
-                      <p className="font-bold text-accent">Excellent</p>
-                    </div>
-                  </div>
                 </div>
               </div>
             )}
@@ -349,7 +352,7 @@ export default function CreateProfile() {
                 onClick={handleNext}
                 disabled={isProcessing}
               >
-                {step === 4 ? (isProcessing ? 'Creating...' : 'Build their Echo') : 'Continue'}
+                {step === 4 ? (isProcessing ? 'Processing...' : 'Build their Echo') : 'Continue'}
               </Button>
             </div>
           </div>
