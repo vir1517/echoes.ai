@@ -1,10 +1,27 @@
+
+"use client";
+
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
 import { Plus, Heart } from "lucide-react";
 import Image from 'next/image';
-import { MOCK_LOVED_ONES } from '@/lib/mock-data';
+import { MOCK_LOVED_ONES, LovedOne } from '@/lib/mock-data';
+import { useEffect, useState } from 'react';
+import { getProfilesFromPuter } from '@/lib/puter';
 
 export default function Home() {
+  const [profiles, setProfiles] = useState<LovedOne[]>(MOCK_LOVED_ONES);
+
+  useEffect(() => {
+    async function loadProfiles() {
+      const puterProfiles = await getProfilesFromPuter();
+      if (puterProfiles && puterProfiles.length > 0) {
+        setProfiles([...MOCK_LOVED_ONES, ...puterProfiles]);
+      }
+    }
+    loadProfiles();
+  }, []);
+
   return (
     <div className="flex flex-col min-h-screen bg-background">
       <header className="px-8 h-24 flex items-center justify-between">
@@ -26,7 +43,7 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-            {MOCK_LOVED_ONES.map((person) => (
+            {profiles.map((person) => (
               <Link 
                 key={person.id} 
                 href={`/profile/${person.id}`}
@@ -50,7 +67,7 @@ export default function Home() {
                     </p>
                   </div>
                   <div className="flex gap-2 justify-center">
-                    {person.traits.slice(0, 2).map(trait => (
+                    {(person.traits || []).slice(0, 2).map(trait => (
                       <span key={trait} className="text-[9px] px-3 py-1 rounded-full bg-primary/20 text-white/50 border border-white/5 uppercase tracking-tighter">
                         {trait}
                       </span>

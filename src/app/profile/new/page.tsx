@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from 'react';
@@ -9,18 +10,60 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { saveProfileToPuter } from '@/lib/puter';
+import { useToast } from "@/hooks/use-toast";
 
 export default function CreateProfile() {
   const router = useRouter();
+  const { toast } = useToast();
   const [step, setStep] = useState(1);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    birthYear: '',
+    passingYear: '',
+    relation: '',
+    birthPlace: '',
+    personality: '',
+    phrases: '',
+    hasAccent: false
+  });
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (step < 4) {
       setStep(step + 1);
     } else {
       setIsProcessing(true);
-      setTimeout(() => router.push('/'), 4000);
+      
+      // Construct the memory profile data
+      const newProfile = {
+        id: `profile-${Date.now()}`,
+        ...formData,
+        avatarUrl: 'https://picsum.photos/seed/new/400/400', 
+        traits: ['Newly Created'],
+        summary: formData.personality || 'A life remembered with love.',
+        events: []
+      };
+
+      // Integrate with Puter.js for cloud storage
+      const success = await saveProfileToPuter(newProfile);
+      
+      setTimeout(() => {
+        if (success) {
+          toast({
+            title: "Echo Created",
+            description: "Their memory is now preserved in your vault.",
+          });
+          router.push('/');
+        } else {
+          toast({
+            title: "Creation Error",
+            description: "We couldn't reach the cloud. Please check your connection.",
+            variant: "destructive"
+          });
+          setIsProcessing(false);
+        }
+      }, 4000);
     }
   };
 
@@ -45,7 +88,6 @@ export default function CreateProfile() {
       </header>
 
       <main className="flex-1 max-w-3xl mx-auto w-full px-8 py-16 space-y-16">
-        {/* Progress Timeline */}
         <div className="flex items-center justify-between relative px-4">
           <div className="absolute top-4 left-0 right-0 h-px bg-white/5 -z-10 mx-12" />
           {steps.map((s) => (
@@ -91,19 +133,36 @@ export default function CreateProfile() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-4 md:col-span-2">
                     <Label className="text-xs uppercase tracking-widest font-bold opacity-60">Full Name</Label>
-                    <Input placeholder="Margaret Smith" className="bg-white/5 border-white/5 h-14 text-lg rounded-xl" />
+                    <Input 
+                      placeholder="Margaret Smith" 
+                      className="bg-white/5 border-white/5 h-14 text-lg rounded-xl"
+                      value={formData.name}
+                      onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    />
                   </div>
                   <div className="space-y-4">
                     <Label className="text-xs uppercase tracking-widest font-bold opacity-60">Birth Year</Label>
-                    <Input type="number" placeholder="1945" className="bg-white/5 border-white/5 h-14 rounded-xl" />
+                    <Input 
+                      type="number" 
+                      placeholder="1945" 
+                      className="bg-white/5 border-white/5 h-14 rounded-xl"
+                      value={formData.birthYear}
+                      onChange={(e) => setFormData({...formData, birthYear: e.target.value})}
+                    />
                   </div>
                   <div className="space-y-4">
                     <Label className="text-xs uppercase tracking-widest font-bold opacity-60">Passing Year</Label>
-                    <Input type="number" placeholder="2020" className="bg-white/5 border-white/5 h-14 rounded-xl" />
+                    <Input 
+                      type="number" 
+                      placeholder="2020" 
+                      className="bg-white/5 border-white/5 h-14 rounded-xl"
+                      value={formData.passingYear}
+                      onChange={(e) => setFormData({...formData, passingYear: e.target.value})}
+                    />
                   </div>
                   <div className="space-y-4">
                     <Label className="text-xs uppercase tracking-widest font-bold opacity-60">Relation</Label>
-                    <Select>
+                    <Select onValueChange={(val) => setFormData({...formData, relation: val})}>
                       <SelectTrigger className="bg-white/5 border-white/5 h-14 rounded-xl">
                         <SelectValue placeholder="Select relationship" />
                       </SelectTrigger>
@@ -119,7 +178,12 @@ export default function CreateProfile() {
                   </div>
                   <div className="space-y-4">
                     <Label className="text-xs uppercase tracking-widest font-bold opacity-60">Birthplace</Label>
-                    <Input placeholder="Dublin, Ireland" className="bg-white/5 border-white/5 h-14 rounded-xl" />
+                    <Input 
+                      placeholder="Dublin, Ireland" 
+                      className="bg-white/5 border-white/5 h-14 rounded-xl"
+                      value={formData.birthPlace}
+                      onChange={(e) => setFormData({...formData, birthPlace: e.target.value})}
+                    />
                   </div>
                 </div>
 
@@ -129,18 +193,25 @@ export default function CreateProfile() {
                     <Textarea 
                       placeholder="He was quiet but funny. Very patient. Always had a story ready..." 
                       className="bg-white/5 border-white/5 min-h-[120px] rounded-xl text-lg p-6"
+                      value={formData.personality}
+                      onChange={(e) => setFormData({...formData, personality: e.target.value})}
                     />
                   </div>
                   <div className="space-y-4">
                     <Label className="text-xs uppercase tracking-widest font-bold opacity-60">Common Phrases</Label>
-                    <Input placeholder="e.g. 'Right as rain', 'Good luck to ya'" className="bg-white/5 border-white/5 h-14 rounded-xl" />
+                    <Input 
+                      placeholder="e.g. 'Right as rain', 'Good luck to ya'" 
+                      className="bg-white/5 border-white/5 h-14 rounded-xl"
+                      value={formData.phrases}
+                      onChange={(e) => setFormData({...formData, phrases: e.target.value})}
+                    />
                   </div>
                   <div className="flex items-center justify-between p-6 bg-white/5 rounded-2xl border border-white/5">
                     <div className="space-y-1">
                       <Label className="text-sm font-bold">Regional Accent</Label>
                       <p className="text-xs text-muted-foreground">Did they have a strong dialect?</p>
                     </div>
-                    <Switch />
+                    <Switch checked={formData.hasAccent} onCheckedChange={(val) => setFormData({...formData, hasAccent: val})} />
                   </div>
                 </div>
               </div>
@@ -205,11 +276,14 @@ export default function CreateProfile() {
                     <Label className="text-xs uppercase tracking-widest font-bold opacity-60">Secret Invite Link</Label>
                     <div className="flex gap-2">
                       <Input readOnly value="echoes.app/invite/f829-x291-k911" className="bg-black/20 border-white/5 h-12 font-mono text-sm" />
-                      <Button className="bg-accent text-accent-foreground px-6 font-bold">Copy</Button>
+                      <Button className="bg-accent text-accent-foreground px-6 font-bold" onClick={() => {
+                        navigator.clipboard.writeText("echoes.app/invite/f829-x291-k911");
+                        toast({ title: "Link Copied", description: "Share it with your family members." });
+                      }}>Copy</Button>
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground text-center">
-                    Share this link privately. Anyone with it can add their own memories to this profile.
+                    Share this link privately. Anyone with it can contribute their own memories.
                   </p>
                 </div>
               </div>
@@ -223,14 +297,18 @@ export default function CreateProfile() {
                 </div>
                 <div className="p-8 rounded-[2rem] bg-white/5 border border-white/5 space-y-6">
                   <div className="flex items-center gap-6">
-                    <div className="w-24 h-24 rounded-2xl bg-primary/20" />
+                    <div className="w-24 h-24 rounded-2xl bg-primary/20 overflow-hidden relative">
+                       <ImageIcon className="w-8 h-8 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-muted-foreground/30" />
+                    </div>
                     <div className="space-y-1">
-                      <h3 className="text-2xl font-bold text-white">Margaret Smith</h3>
-                      <p className="text-accent text-sm font-bold uppercase tracking-widest">Mother • 1945 — 2020</p>
+                      <h3 className="text-2xl font-bold text-white">{formData.name || 'Margaret Smith'}</h3>
+                      <p className="text-accent text-sm font-bold uppercase tracking-widest">
+                        {formData.relation || 'Mother'} • {formData.birthYear || '1945'} — {formData.passingYear || '2020'}
+                      </p>
                     </div>
                   </div>
                   <p className="text-muted-foreground leading-relaxed italic border-l-2 border-accent/40 pl-6 py-2">
-                    "She was a force of nature, always in the garden or at the easel. She taught us that beauty is found in the smallest details..."
+                    "{formData.personality || 'She was a force of nature, always in the garden or at the easel...'}"
                   </p>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 bg-black/20 rounded-xl">
@@ -252,8 +330,13 @@ export default function CreateProfile() {
                   Back
                 </Button>
               )}
-              <Button size="lg" className="flex-[2] bg-accent text-accent-foreground hover:bg-accent/90 rounded-full h-16 text-lg font-bold shadow-xl transition-all hover:scale-[1.02]" onClick={handleNext}>
-                {step === 4 ? 'Build their Echo' : 'Continue'}
+              <Button 
+                size="lg" 
+                className="flex-[2] bg-accent text-accent-foreground hover:bg-accent/90 rounded-full h-16 text-lg font-bold shadow-xl transition-all hover:scale-[1.02]" 
+                onClick={handleNext}
+                disabled={isProcessing}
+              >
+                {step === 4 ? (isProcessing ? 'Creating...' : 'Build their Echo') : 'Continue'}
               </Button>
             </div>
           </div>
