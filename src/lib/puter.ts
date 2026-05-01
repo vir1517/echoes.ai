@@ -9,8 +9,6 @@ import * as puter from 'puter';
  */
 export const getPuter = () => {
   if (typeof window !== 'undefined') {
-    // Puter is often available globally in its own environment
-    // Or via the default export of the npm package
     const p = (window as any).puter || (puter as any).default || puter;
     return p;
   }
@@ -20,12 +18,12 @@ export const getPuter = () => {
 const STORAGE_KEY = 'echo_profiles_v3';
 
 /**
- * Saves a profile to Puter KV storage with LocalStorage as a fallback.
+ * Saves a profile to Puter KV storage with LocalStorage as a primary source of truth.
  */
 export async function saveProfileToPuter(profileData: any) {
   const p = getPuter();
   
-  // 1. Update LocalStorage immediately for cross-tab availability
+  // 1. Update LocalStorage immediately
   if (typeof window !== 'undefined') {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -39,8 +37,9 @@ export async function saveProfileToPuter(profileData: any) {
       }
       
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
-      // Manually trigger storage event for the same tab if needed, 
-      // though 'storage' event natively fires in other tabs.
+      
+      // Dispatch a storage event manually so the same tab can listen if needed
+      window.dispatchEvent(new Event('storage'));
     } catch (e) {
       console.error("Local storage update failed:", e);
     }
@@ -49,9 +48,8 @@ export async function saveProfileToPuter(profileData: any) {
   // 2. Sync with Puter KV in the background
   if (p && p.kv) {
     try {
-      let profiles = [];
       const stored = await p.kv.get('echo_profiles');
-      profiles = Array.isArray(stored) ? stored : (typeof stored === 'string' ? JSON.parse(stored) : []);
+      let profiles = Array.isArray(stored) ? stored : (typeof stored === 'string' ? JSON.parse(stored) : []);
 
       const index = profiles.findIndex((pr: any) => pr.id === profileData.id);
       if (index !== -1) {
@@ -137,6 +135,7 @@ export async function deleteProfileFromPuter(id: string) {
         const profiles = JSON.parse(stored);
         const filtered = profiles.filter((pr: any) => pr.id !== id);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+        window.dispatchEvent(new Event('storage'));
       }
     } catch (e) {
       console.error("Local storage delete failed:", e);

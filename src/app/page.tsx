@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Button } from "@/components/ui/button";
 import { Heart, Sparkles, User, Settings, Plus } from "lucide-react";
 import Image from 'next/image';
-import { MOCK_LOVED_ONES, LovedOne } from '@/lib/mock-data';
+import { LovedOne } from '@/lib/mock-data';
 import { useEffect, useState, useCallback } from 'react';
 import { getProfilesFromPuter } from '@/lib/puter';
 
@@ -14,21 +14,10 @@ export default function Home() {
 
   const loadProfiles = useCallback(async () => {
     try {
-      const puterProfiles = await getProfilesFromPuter();
-      // Merge mock data with cloud/local data for a rich initial experience
-      const merged = [...puterProfiles];
-      const existingIds = new Set(merged.map(p => p.id));
-      
-      MOCK_LOVED_ONES.forEach(mock => {
-        if (!existingIds.has(mock.id)) {
-          merged.push(mock);
-        }
-      });
-      
-      setProfiles(merged);
+      const userProfiles = await getProfilesFromPuter();
+      setProfiles(userProfiles);
     } catch (error) {
       console.error("Failed to load family vault:", error);
-      setProfiles(MOCK_LOVED_ONES);
     } finally {
       setIsLoading(false);
     }
@@ -38,14 +27,18 @@ export default function Home() {
     loadProfiles();
 
     // Listen for storage events to sync across tabs
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'echo_profiles_v3') {
-        loadProfiles();
-      }
+    const handleSync = () => {
+      loadProfiles();
     };
 
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    window.addEventListener('storage', handleSync);
+    // Custom event check for same-tab updates
+    window.addEventListener('profile-updated', handleSync);
+    
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('profile-updated', handleSync);
+    };
   }, [loadProfiles]);
 
   return (
