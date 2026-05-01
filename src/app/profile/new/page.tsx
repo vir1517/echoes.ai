@@ -1,7 +1,6 @@
-
 "use client";
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Upload, Users, Check, Loader2, Sparkles, Heart, Mic, Video, Image as ImageIcon, FileText, Plus, X, AlertCircle } from "lucide-react";
@@ -41,6 +40,11 @@ export default function CreateProfile() {
   const [newMemory, setNewMemory] = useState('');
   const [artifacts, setArtifacts] = useState<{type: 'image' | 'video' | 'audio' | 'text', name: string, dataUri: string}[]>([]);
 
+  // Clear validation error when user changes data
+  useEffect(() => {
+    setValidationError(null);
+  }, [formData, memories, artifacts]);
+
   const addMemory = () => {
     if (!newMemory.trim()) return;
     setMemories([...memories, { type: 'text', content: newMemory }]);
@@ -51,17 +55,21 @@ export default function CreateProfile() {
     setMemories(memories.filter((_, i) => i !== index));
   };
 
-  // Helper to resize images on the client to reduce payload size
+  /**
+   * Resizes an image on the client to reduce payload size.
+   */
   const resizeImage = (file: File): Promise<string> => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Failed to read file"));
       reader.onload = (e) => {
         const img = new Image();
+        img.onerror = () => reject(new Error("Failed to load image"));
         img.onload = () => {
           const canvas = document.createElement('canvas');
           let width = img.width;
           let height = img.height;
-          const maxDim = 1200;
+          const maxDim = 800; // Efficient size for AI analysis
 
           if (width > height && width > maxDim) {
             height *= maxDim / width;
@@ -74,8 +82,11 @@ export default function CreateProfile() {
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.8));
+          if (!ctx) {
+            return resolve(e.target?.result as string);
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.7));
         };
         img.src = e.target?.result as string;
       };
@@ -93,22 +104,26 @@ export default function CreateProfile() {
       else if (file.type.startsWith('video/')) type = 'video';
       else if (file.type.startsWith('audio/')) type = 'audio';
 
-      if (type === 'image') {
-        const optimizedUri = await resizeImage(file);
-        setArtifacts(prev => [...prev, { type, name: file.name, dataUri: optimizedUri }]);
-      } else {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          setArtifacts(prev => [...prev, {
-            type,
-            name: file.name,
-            dataUri: event.target?.result as string
-          }]);
-        };
-        reader.readAsDataURL(file);
+      try {
+        if (type === 'image') {
+          const optimizedUri = await resizeImage(file);
+          setArtifacts(prev => [...prev, { type, name: file.name, dataUri: optimizedUri }]);
+        } else {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            setArtifacts(prev => [...prev, {
+              type,
+              name: file.name,
+              dataUri: event.target?.result as string
+            }]);
+          };
+          reader.readAsDataURL(file);
+        }
+      } catch (err) {
+        console.error("Upload error:", err);
+        toast({ title: "Upload Failed", description: `Could not process ${file.name}.`, variant: "destructive" });
       }
     }
-    // Reset input so the same file can be uploaded again if needed
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -116,18 +131,22 @@ export default function CreateProfile() {
     setArtifacts(prev => prev.filter((_, i) => i !== index));
   };
 
+  /**
+   * Validates the current step before allowing progression.
+   */
   const validateStep = () => {
-    setValidationError(null);
     if (step === 1) {
-      if (!formData.name.trim()) return "Please enter their name.";
+      if (!formData.name.trim()) return "Please enter their full name.";
       if (!formData.birthYear) return "Please enter their birth year.";
       if (!formData.passingYear) return "Please enter the year they passed away.";
-      if (!formData.relation) return "Please select your relationship.";
-      if (!formData.personality.trim()) return "Please describe their personality so we can learn who they were.";
+      if (!formData.relation) return "Please select your relationship to them.";
+      if (!formData.personality.trim() || formData.personality.length < 10) {
+        return "Please provide a brief description of their personality (at least 10 characters).";
+      }
     }
     if (step === 2) {
       if (memories.length === 0 && artifacts.length === 0) {
-        return "Please share at least one memory or upload an artifact to help build their Echo.";
+        return "Please share at least one memory or upload an artifact to build their Echo.";
       }
     }
     return null;
@@ -137,6 +156,8 @@ export default function CreateProfile() {
     const error = validateStep();
     if (error) {
       setValidationError(error);
+      // Scroll to error
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
@@ -152,9 +173,9 @@ export default function CreateProfile() {
           `Name: ${formData.name}`,
           `Relation: They were the user's ${formData.relation}.`,
           `Personality: ${formData.personality}`,
-          `Common Phrases Entered: ${formData.phrases}`,
-          `Birthplace context: Born in ${formData.birthPlace}.`,
-          ...memories.map(m => `Specific Memory: ${m.content}`)
+          `Common Phrases: ${formData.phrases}`,
+          `Born in: ${formData.birthPlace}.`,
+          ...memories.map(m => `Memory: ${m.content}`)
         ];
 
         const imageDataUris = artifacts.filter(a => a.type === 'image').map(a => a.dataUri);
@@ -201,13 +222,13 @@ export default function CreateProfile() {
           });
           router.push('/');
         } else {
-          throw new Error("Persistence error.");
+          throw new Error("Could not persist profile.");
         }
       } catch (err) {
         console.error("Error creating profile:", err);
         toast({
           title: "Processing Error",
-          description: "The archive was too large or the connection was interrupted. Try uploading fewer artifacts at once.",
+          description: "The connection to the archive was interrupted. Please try again.",
           variant: "destructive"
         });
         setIsProcessing(false);
@@ -235,7 +256,7 @@ export default function CreateProfile() {
         <div className="w-12" />
       </header>
 
-      {/* Hidden file input always at root for ref stability */}
+      {/* Hidden file input for artifact uploading */}
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -256,14 +277,12 @@ export default function CreateProfile() {
               )}>
                 {step > s.id ? <Check className="w-5 h-5" /> : s.id}
               </div>
-              <div className="flex flex-col items-center">
-                <span className={cn(
-                  "text-[10px] font-bold uppercase tracking-[0.2em] transition-colors duration-700",
-                  step >= s.id ? 'text-white' : 'text-muted-foreground'
-                )}>
-                  {s.title}
-                </span>
-              </div>
+              <span className={cn(
+                "text-[10px] font-bold uppercase tracking-[0.2em] transition-colors duration-700",
+                step >= s.id ? 'text-white' : 'text-muted-foreground'
+              )}>
+                {s.title}
+              </span>
             </div>
           ))}
         </div>
@@ -271,7 +290,7 @@ export default function CreateProfile() {
         {validationError && (
           <Alert variant="destructive" className="bg-destructive/10 border-destructive/20 text-destructive animate-in fade-in slide-in-from-top-2">
             <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Required Information Missing</AlertTitle>
+            <AlertTitle>Action Required</AlertTitle>
             <AlertDescription>{validationError}</AlertDescription>
           </Alert>
         )}
@@ -284,9 +303,7 @@ export default function CreateProfile() {
             </div>
             <div className="space-y-6 max-w-md">
               <h2 className="text-4xl font-bold tracking-tight text-white">Building their Echo</h2>
-              <div className="space-y-3 text-muted-foreground italic text-lg font-medium">
-                <p className="animate-pulse">{processingStatus}</p>
-              </div>
+              <p className="text-muted-foreground italic text-lg font-medium animate-pulse">{processingStatus}</p>
             </div>
           </div>
         ) : (
@@ -295,7 +312,7 @@ export default function CreateProfile() {
               <div className="space-y-12">
                 <div className="space-y-3">
                   <h2 className="text-5xl font-bold text-white tracking-tight">Who were they?</h2>
-                  <p className="text-muted-foreground text-xl italic font-medium opacity-60">"Tell us about the person you love."</p>
+                  <p className="text-muted-foreground text-xl italic font-medium opacity-60">"Every persona begins with a name and a story."</p>
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
@@ -303,7 +320,7 @@ export default function CreateProfile() {
                     <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Full Name *</Label>
                     <Input 
                       placeholder="Margaret Smith" 
-                      className="bg-white/5 border-white/10 h-16 text-xl rounded-2xl px-6 focus:border-accent/50 focus:ring-accent/20"
+                      className="bg-white/5 border-white/10 h-16 text-xl rounded-2xl px-6 focus:border-accent/50"
                       value={formData.name}
                       onChange={(e) => setFormData({...formData, name: e.target.value})}
                     />
@@ -347,7 +364,7 @@ export default function CreateProfile() {
                   <div className="space-y-5">
                     <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Birthplace</Label>
                     <Input 
-                      placeholder="Dublin, Ireland" 
+                      placeholder="e.g. Dublin, Ireland" 
                       className="bg-white/5 border-white/10 h-16 rounded-2xl px-6"
                       value={formData.birthPlace}
                       onChange={(e) => setFormData({...formData, birthPlace: e.target.value})}
@@ -359,27 +376,20 @@ export default function CreateProfile() {
                   <div className="space-y-5">
                     <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Their Personality *</Label>
                     <Textarea 
-                      placeholder="He was quiet but funny. Very patient. Always had a story ready..." 
-                      className="bg-white/5 border-white/10 min-h-[160px] rounded-[2rem] text-xl p-8 italic font-medium leading-relaxed"
+                      placeholder="Share a bit about who they were. What was their spirit like?" 
+                      className="bg-white/5 border-white/10 min-h-[160px] rounded-[2rem] text-xl p-8 italic"
                       value={formData.personality}
                       onChange={(e) => setFormData({...formData, personality: e.target.value})}
                     />
                   </div>
                   <div className="space-y-5">
-                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Common Phrases</Label>
+                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Signature Phrases</Label>
                     <Input 
                       placeholder="e.g. 'Right as rain', 'Good luck to ya'" 
                       className="bg-white/5 border-white/10 h-16 rounded-2xl px-6"
                       value={formData.phrases}
                       onChange={(e) => setFormData({...formData, phrases: e.target.value})}
                     />
-                  </div>
-                  <div className="flex items-center justify-between p-8 bg-white/5 rounded-[2.5rem] border border-white/10">
-                    <div className="space-y-2">
-                      <Label className="text-lg font-bold">Regional Accent</Label>
-                      <p className="text-sm text-muted-foreground font-medium opacity-60">Did they have a strong dialect or unique cadence?</p>
-                    </div>
-                    <Switch checked={formData.hasAccent} onCheckedChange={(val) => setFormData({...formData, hasAccent: val})} className="scale-125 data-[state=checked]:bg-accent" />
                   </div>
                 </div>
               </div>
@@ -389,29 +399,29 @@ export default function CreateProfile() {
               <div className="space-y-12">
                 <div className="space-y-3">
                   <h2 className="text-5xl font-bold text-white tracking-tight">Share their memories</h2>
-                  <p className="text-muted-foreground text-xl italic font-medium opacity-60">"This is how we learn who they were."</p>
+                  <p className="text-muted-foreground text-xl italic font-medium opacity-60">"Provide artifacts to help the Echo learn their voice and story."</p>
                 </div>
 
                 <div className="space-y-8">
                   <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Memory Snippets</Label>
                   <div className="flex gap-3">
                     <Input 
-                      placeholder="Share a defining story or memory..." 
+                      placeholder="Add a story, a habit, or a defining moment..." 
                       className="bg-white/5 border-white/10 h-16 rounded-2xl px-6 text-lg"
                       value={newMemory}
                       onChange={(e) => setNewMemory(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && addMemory()}
                     />
-                    <Button onClick={addMemory} className="h-16 w-16 rounded-2xl bg-accent text-accent-foreground hover:bg-accent/90 shadow-xl transition-all active:scale-95">
+                    <Button onClick={addMemory} className="h-16 w-16 rounded-2xl bg-accent text-accent-foreground hover:bg-accent/90 transition-all active:scale-95">
                       <Plus className="w-8 h-8" />
                     </Button>
                   </div>
 
                   <div className="grid gap-4">
                     {memories.map((m, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-6 bg-white/5 border border-white/10 rounded-2xl group animate-in slide-in-from-right-4 duration-500">
-                        <p className="text-lg text-white/90 italic font-medium leading-relaxed">"{m.content}"</p>
-                        <Button variant="ghost" size="icon" onClick={() => removeMemory(idx)} className="opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive rounded-full">
+                      <div key={idx} className="flex items-center justify-between p-6 bg-white/5 border border-white/10 rounded-2xl group animate-in slide-in-from-right-4">
+                        <p className="text-lg text-white/90 italic">"{m.content}"</p>
+                        <Button variant="ghost" size="icon" onClick={() => removeMemory(idx)} className="opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive">
                           <X className="w-5 h-5" />
                         </Button>
                       </div>
@@ -420,27 +430,27 @@ export default function CreateProfile() {
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
+                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group">
                     <ImageIcon className="w-10 h-10 text-accent group-hover:scale-110 transition-transform" />
                     <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Photos</span>
                   </button>
-                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
+                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group">
                     <Video className="w-10 h-10 text-accent group-hover:scale-110 transition-transform" />
                     <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Videos</span>
                   </button>
-                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
+                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group">
                     <Mic className="w-10 h-10 text-accent group-hover:scale-110 transition-transform" />
                     <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Voice</span>
                   </button>
-                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
+                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group">
                     <FileText className="w-10 h-10 text-accent group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Documents</span>
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Docs</span>
                   </button>
                 </div>
 
                 {artifacts.length > 0 && (
                   <div className="space-y-6">
-                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Uploaded Artifacts</Label>
+                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Artifacts Collection</Label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {artifacts.map((a, idx) => (
                         <div key={idx} className="flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl group">
@@ -454,7 +464,7 @@ export default function CreateProfile() {
                             <p className="text-sm font-medium text-white truncate">{a.name}</p>
                             <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{a.type}</p>
                           </div>
-                          <Button variant="ghost" size="icon" onClick={() => removeArtifact(idx)} className="opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive rounded-full">
+                          <Button variant="ghost" size="icon" onClick={() => removeArtifact(idx)} className="opacity-0 group-hover:opacity-100 hover:text-destructive">
                             <X className="w-4 h-4" />
                           </Button>
                         </div>
@@ -462,46 +472,27 @@ export default function CreateProfile() {
                     </div>
                   </div>
                 )}
-
-                <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="p-16 border-2 border-dashed border-white/10 rounded-[3rem] flex flex-col items-center justify-center text-center gap-8 group hover:border-accent/30 hover:bg-white/[0.01] transition-all duration-700 shadow-inner cursor-pointer"
-                >
-                  <Upload className="w-16 h-16 text-muted-foreground group-hover:text-accent transition-all duration-700 group-hover:scale-110" />
-                  <div className="space-y-3">
-                    <p className="text-2xl font-bold text-white tracking-tight">Add artifacts here</p>
-                    <p className="text-muted-foreground italic text-lg font-medium opacity-60">"Letters, voice notes, home movies, and portraits."</p>
-                  </div>
-                  <Button variant="outline" className="rounded-full border-white/20 px-10 h-14 font-bold tracking-widest uppercase text-xs hover:bg-white/10">Browse Archive</Button>
-                </div>
-                
-                <div className="flex gap-6 p-8 bg-accent/5 rounded-[2rem] border border-accent/20">
-                  <Heart className="w-8 h-8 text-accent shrink-0" />
-                  <p className="text-sm leading-relaxed text-muted-foreground font-medium">
-                    <strong className="text-accent">A gentle tip:</strong> Sharing artifacts helps the Echo remember more deeply. Every detail contributes to their digital spirit.
-                  </p>
-                </div>
               </div>
             )}
 
             {step === 3 && (
               <div className="space-y-12">
                 <div className="space-y-3 text-center">
-                  <div className="w-24 h-24 rounded-full bg-accent/10 flex items-center justify-center text-accent mx-auto mb-10 shadow-[0_0_50px_rgba(82,224,224,0.2)]">
+                  <div className="w-24 h-24 rounded-full bg-accent/10 flex items-center justify-center text-accent mx-auto mb-10 shadow-2xl">
                     <Users className="w-12 h-12" />
                   </div>
                   <h2 className="text-5xl font-bold text-white tracking-tight">Invite the family</h2>
-                  <p className="text-muted-foreground text-xl italic font-medium opacity-60">"Echoes are richer when we remember together."</p>
+                  <p className="text-muted-foreground text-xl italic font-medium opacity-60">"Remembrance is a shared journey."</p>
                 </div>
 
                 <div className="bg-white/[0.02] p-12 rounded-[3rem] border border-white/10 space-y-10 shadow-2xl">
                   <div className="space-y-5">
-                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Private Invite Link</Label>
+                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Private Vault Link</Label>
                     <div className="flex gap-3">
                       <Input readOnly value={`echoes.app/invite/v${Date.now().toString(36)}`} className="bg-black/40 border-white/10 h-14 font-mono text-sm px-6 rounded-xl" />
                       <Button className="bg-accent text-accent-foreground px-10 font-bold h-14 rounded-xl shadow-xl hover:bg-accent/90" onClick={() => {
                         navigator.clipboard.writeText(`echoes.app/invite/v${Date.now().toString(36)}`);
-                        toast({ title: "Link Copied", description: "Share it privately with your family members." });
+                        toast({ title: "Link Copied", description: "Share it with trusted family members." });
                       }}>Copy</Button>
                     </div>
                   </div>
@@ -512,14 +503,14 @@ export default function CreateProfile() {
             {step === 4 && (
               <div className="space-y-12">
                 <div className="space-y-3">
-                  <h2 className="text-5xl font-bold text-white tracking-tight">One final look</h2>
-                  <p className="text-muted-foreground text-xl italic font-medium opacity-60">"Everything is ready to begin."</p>
+                  <h2 className="text-5xl font-bold text-white tracking-tight">Final Look</h2>
+                  <p className="text-muted-foreground text-xl italic font-medium opacity-60">"Confirm the identity of this Echo."</p>
                 </div>
-                <div className="p-12 rounded-[3.5rem] bg-white/[0.02] border border-white/10 space-y-10 shadow-2xl overflow-hidden relative">
+                <div className="p-12 rounded-[3.5rem] bg-white/[0.02] border border-white/10 space-y-10 shadow-2xl relative overflow-hidden">
                   <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-primary/5 rounded-full blur-[80px]" />
                   
                   <div className="flex items-center gap-8 relative z-10">
-                    <div className="w-32 h-32 rounded-[2.5rem] bg-primary/20 overflow-hidden relative border-2 border-primary/40 flex items-center justify-center">
+                    <div className="w-32 h-32 rounded-[2.5rem] bg-primary/20 overflow-hidden border-2 border-primary/40 flex items-center justify-center">
                        {artifacts.find(a => a.type === 'image') ? (
                          <img src={artifacts.find(a => a.type === 'image')?.dataUri} className="object-cover w-full h-full" />
                        ) : (
@@ -527,27 +518,10 @@ export default function CreateProfile() {
                        )}
                     </div>
                     <div className="space-y-2">
-                      <h3 className="text-4xl font-bold text-white tracking-tight">{formData.name || 'Anonymous Loved One'}</h3>
+                      <h3 className="text-4xl font-bold text-white tracking-tight">{formData.name}</h3>
                       <p className="text-accent text-sm font-bold uppercase tracking-[0.3em]">
-                        {formData.relation || 'Family'} • {formData.birthYear || '—'} — {formData.passingYear || '—'}
+                        {formData.relation} • {formData.birthYear} — {formData.passingYear}
                       </p>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-6 relative z-10">
-                    <p className="text-2xl text-white/90 leading-relaxed italic border-l-4 border-accent/40 pl-8 py-4 font-medium">
-                      "{formData.personality || 'A beautiful life to be remembered...'}"
-                    </p>
-                  </div>
-                  
-                  <div className="pt-8 border-t border-white/5 relative z-10 flex gap-12">
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-accent/60">Contributed Stories</span>
-                      <p className="text-lg text-white/60 mt-1 font-medium">{memories.length} life snippets</p>
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-accent/60">Artifacts</span>
-                      <p className="text-lg text-white/60 mt-1 font-medium">{artifacts.length} preserved items</p>
                     </div>
                   </div>
                 </div>
@@ -566,7 +540,7 @@ export default function CreateProfile() {
                 onClick={handleNext}
                 disabled={isProcessing}
               >
-                {step === 4 ? (isProcessing ? 'Processing Memories...' : 'Build their Echo') : 'Continue'}
+                {step === 4 ? (isProcessing ? 'Processing...' : 'Build their Echo') : 'Continue'}
               </Button>
             </div>
           </div>
