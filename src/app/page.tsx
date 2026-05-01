@@ -2,81 +2,107 @@
 
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
-import { Plus, Heart } from "lucide-react";
+import { Plus, Heart, Sparkles, User, Settings } from "lucide-react";
 import Image from 'next/image';
 import { MOCK_LOVED_ONES, LovedOne } from '@/lib/mock-data';
 import { useEffect, useState } from 'react';
 import { getProfilesFromPuter } from '@/lib/puter';
 
 export default function Home() {
-  const [profiles, setProfiles] = useState<LovedOne[]>(MOCK_LOVED_ONES);
+  const [profiles, setProfiles] = useState<LovedOne[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function loadProfiles() {
       try {
         const puterProfiles = await getProfilesFromPuter();
-        if (puterProfiles && Array.isArray(puterProfiles) && puterProfiles.length > 0) {
-          setProfiles(prev => {
-            // Merge mock data with cloud data, avoiding duplicates by ID
-            const existingIds = new Set(prev.map(p => p.id));
-            const uniqueNew = puterProfiles.filter(p => !existingIds.has(p.id));
-            return [...prev, ...uniqueNew];
-          });
-        }
+        // Merge mock data with cloud data for a rich initial experience
+        // In a real production app, we would only show user's private profiles
+        const merged = [...puterProfiles];
+        const existingIds = new Set(merged.map(p => p.id));
+        
+        MOCK_LOVED_ONES.forEach(mock => {
+          if (!existingIds.has(mock.id)) {
+            merged.push(mock);
+          }
+        });
+        
+        setProfiles(merged);
       } catch (error) {
-        console.error("Failed to load cloud profiles:", error);
+        console.error("Failed to load family vault:", error);
+        setProfiles(MOCK_LOVED_ONES);
+      } finally {
+        setIsLoading(false);
       }
     }
     loadProfiles();
   }, []);
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
-      <header className="px-8 h-24 flex items-center justify-between">
-        <div className="flex flex-col">
-          <h1 className="text-3xl font-bold tracking-tighter text-white">Echoes</h1>
-          <p className="text-[10px] uppercase tracking-[0.3em] text-accent font-bold">Their voice. Forever.</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" className="text-muted-foreground hover:text-white">Our Story</Button>
-          <div className="w-8 h-8 rounded-full bg-primary/20 border border-white/5" />
+    <div className="flex flex-col min-h-screen bg-background selection:bg-accent selection:text-accent-foreground">
+      {/* Sacred Header */}
+      <header className="px-8 h-24 flex items-center justify-between glass sticky top-0 z-50">
+        <Link href="/" className="flex flex-col group">
+          <h1 className="text-3xl font-bold tracking-tighter text-white transition-colors group-hover:text-accent">Echoes</h1>
+          <p className="text-[9px] uppercase tracking-[0.4em] text-accent/80 font-bold">Their voice. Forever.</p>
+        </Link>
+        <div className="flex items-center gap-6">
+          <Button variant="ghost" className="text-muted-foreground hover:text-white hidden md:flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-accent" /> Our Ethos
+          </Button>
+          <div className="h-4 w-px bg-white/10 hidden md:block" />
+          <Button variant="ghost" size="icon" className="rounded-full text-muted-foreground hover:text-accent">
+            <Settings className="w-5 h-5" />
+          </Button>
+          <div className="w-10 h-10 rounded-full bg-primary/20 border border-white/5 flex items-center justify-center text-accent">
+            <User className="w-5 h-5" />
+          </div>
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl mx-auto w-full px-8 py-12">
-        <div className="space-y-12">
-          <div className="max-w-2xl">
-            <h2 className="text-4xl font-bold text-white mb-4">Family Vault</h2>
-            <p className="text-muted-foreground text-lg italic">"Some people never truly leave."</p>
-          </div>
+      <main className="flex-1 max-w-7xl mx-auto w-full px-8 py-16 space-y-16">
+        <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-1000">
+          <h2 className="text-5xl font-bold text-white tracking-tight">Family Vault</h2>
+          <p className="text-muted-foreground text-xl italic font-medium opacity-60">"Some people never truly leave."</p>
+        </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+        {isLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-[450px] rounded-[3rem] bg-white/[0.02] border border-white/5 animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
             {profiles.map((person) => (
               <Link 
                 key={person.id} 
                 href={`/profile/${person.id}`}
-                className="group relative bg-card/40 border border-white/5 rounded-[2rem] p-8 transition-all hover:bg-card/60 hover:border-accent/20 hover:scale-[1.02] duration-500"
+                className="group relative bg-card/20 border border-white/5 rounded-[3rem] p-10 transition-all hover:bg-card/40 hover:border-accent/30 hover:scale-[1.03] duration-700 shadow-2xl overflow-hidden"
               >
-                <div className="flex flex-col items-center text-center space-y-6">
-                  <div className="relative w-40 h-40 rounded-full overflow-hidden border-4 border-primary group-hover:border-accent transition-colors duration-500 shadow-2xl">
+                {/* Subtle background glow */}
+                <div className="absolute -top-24 -right-24 w-48 h-48 bg-accent/5 rounded-full blur-[60px] group-hover:bg-accent/10 transition-colors duration-700" />
+                
+                <div className="flex flex-col items-center text-center space-y-8 relative z-10">
+                  <div className="relative w-48 h-48 rounded-full overflow-hidden border-4 border-primary group-hover:border-accent transition-all duration-1000 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
                     <Image 
                       src={person.avatarUrl} 
                       alt={person.name} 
                       fill 
-                      className="object-cover grayscale group-hover:grayscale-0 transition-all duration-1000"
+                      className="object-cover grayscale group-hover:grayscale-0 transition-all duration-[2000ms] scale-110 group-hover:scale-100"
                       data-ai-hint="portrait elderly"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <span className="text-[10px] font-bold text-accent uppercase tracking-widest">{person.relation}</span>
-                    <h3 className="text-2xl font-bold text-white">{person.name}</h3>
-                    <p className="text-sm text-muted-foreground font-medium">
+                  <div className="space-y-3">
+                    <span className="text-[10px] font-bold text-accent uppercase tracking-[0.3em]">{person.relation}</span>
+                    <h3 className="text-3xl font-bold text-white tracking-tight">{person.name}</h3>
+                    <p className="text-sm text-muted-foreground font-semibold tracking-widest uppercase">
                       {person.birthYear} — {person.passingYear}
                     </p>
                   </div>
-                  <div className="flex gap-2 justify-center">
+                  <div className="flex gap-3 justify-center">
                     {(person.traits || []).slice(0, 2).map(trait => (
-                      <span key={trait} className="text-[9px] px-3 py-1 rounded-full bg-primary/20 text-white/50 border border-white/5 uppercase tracking-tighter">
+                      <span key={trait} className="text-[9px] px-4 py-1.5 rounded-full bg-white/5 text-white/40 border border-white/10 uppercase font-bold tracking-tighter">
                         {trait}
                       </span>
                     ))}
@@ -87,23 +113,32 @@ export default function Home() {
 
             <Link 
               href="/profile/new"
-              className="flex flex-col items-center justify-center p-8 rounded-[2rem] border-2 border-dashed border-white/5 bg-white/[0.02] hover:bg-white/[0.04] hover:border-accent/20 transition-all group min-h-[400px]"
+              className="flex flex-col items-center justify-center p-12 rounded-[3rem] border-2 border-dashed border-white/5 bg-white/[0.01] hover:bg-white/[0.03] hover:border-accent/20 transition-all group min-h-[450px] relative overflow-hidden"
             >
-              <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center text-accent mb-6 group-hover:scale-110 transition-transform">
-                <Plus className="w-8 h-8" />
+              <div className="w-20 h-20 rounded-full bg-accent/5 flex items-center justify-center text-accent mb-8 group-hover:scale-110 group-hover:bg-accent/10 transition-all duration-500">
+                <Plus className="w-10 h-10" />
               </div>
-              <h3 className="text-xl font-bold text-white">Add Someone</h3>
-              <p className="text-sm text-muted-foreground mt-2 text-center max-w-[200px]">Begin preserving their story and spirit.</p>
+              <h3 className="text-2xl font-bold text-white">Add Someone</h3>
+              <p className="text-muted-foreground mt-3 text-center max-w-[200px] text-sm italic font-medium">
+                Begin preserving their story and spirit for eternity.
+              </p>
             </Link>
           </div>
-        </div>
+        )}
       </main>
 
-      <footer className="py-12 px-8 flex flex-col items-center gap-4 text-center">
-        <Heart className="w-5 h-5 text-accent/40" />
-        <p className="text-[10px] text-muted-foreground uppercase tracking-widest max-w-xs leading-loose">
-          Echoes is a space of remembrance. Every profile is private, secure, and shared only with family.
-        </p>
+      <footer className="py-20 px-8 flex flex-col items-center gap-6 text-center">
+        <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center">
+          <Heart className="w-5 h-5 text-accent/40" />
+        </div>
+        <div className="space-y-2">
+          <p className="text-[11px] text-muted-foreground uppercase tracking-[0.3em] max-w-sm mx-auto leading-relaxed font-bold">
+            Echoes is a sacred space of remembrance.
+          </p>
+          <p className="text-[9px] text-muted-foreground/40 uppercase tracking-[0.2em]">
+            Private • Secure • Shared only with family
+          </p>
+        </div>
       </footer>
     </div>
   );
