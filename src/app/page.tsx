@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
-import { Heart, Sparkles, User, Settings, Plus, RefreshCw } from "lucide-react";
+import { Heart, User, Settings, Plus, RefreshCw } from "lucide-react";
 import Image from 'next/image';
 import { LovedOne } from '@/lib/mock-data';
 import { useEffect, useState, useCallback } from 'react';
@@ -26,23 +26,31 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    // Initial load
     loadProfiles();
 
     const handleSync = () => {
+      // Background sync, no full-page loader
       loadProfiles(false);
     };
 
-    // Listen for storage changes (cross-tab)
+    // 1. Storage Event: Cross-tab sync for same origin
     window.addEventListener('storage', handleSync);
-    // Listen for manual updates (same tab)
+    
+    // 2. Custom Event: Same-tab internal sync
     window.addEventListener('profile-updated', handleSync);
-    // Refresh when user returns to this tab
+    
+    // 3. Focus Event: Sync when user returns to this tab
     window.addEventListener('focus', handleSync);
+
+    // 4. Polling Safety Net: Sync every 5 seconds for inconsistent environments (like integrated previews)
+    const interval = setInterval(handleSync, 5000);
     
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('profile-updated', handleSync);
       window.removeEventListener('focus', handleSync);
+      clearInterval(interval);
     };
   }, [loadProfiles]);
 
@@ -57,7 +65,7 @@ export default function Home() {
           <Button 
             variant="ghost" 
             size="sm" 
-            onClick={() => loadProfiles()} 
+            onClick={() => loadProfiles(true)} 
             className="text-muted-foreground hover:text-accent gap-2"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} /> Sync
@@ -78,7 +86,7 @@ export default function Home() {
           <p className="text-muted-foreground text-xl italic font-medium opacity-60">"Some people never truly leave."</p>
         </div>
 
-        {isLoading ? (
+        {isLoading && profiles.length === 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-10">
             {[1, 2, 3].map(i => (
               <div key={i} className="h-[450px] rounded-[3rem] bg-white/[0.02] border border-white/5 animate-pulse" />
@@ -90,7 +98,7 @@ export default function Home() {
               <Link 
                 key={person.id} 
                 href={`/profile/${person.id}`}
-                className="group relative bg-card/20 border border-white/5 rounded-[3rem] p-10 transition-all hover:bg-card/40 hover:border-accent/30 hover:scale-[1.03] duration-700 shadow-2xl overflow-hidden"
+                className="group relative bg-card/20 border border-white/5 rounded-[3rem] p-10 transition-all hover:bg-card/40 hover:border-accent/30 hover:scale-[1.03] duration-700 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95"
               >
                 <div className="absolute -top-24 -right-24 w-48 h-48 bg-accent/5 rounded-full blur-[60px] group-hover:bg-accent/10 transition-colors duration-700" />
                 
