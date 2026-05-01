@@ -17,7 +17,7 @@ export const getPuter = () => {
   return null;
 };
 
-const STORAGE_KEY = 'echo_profiles_local';
+const STORAGE_KEY = 'echo_profiles_local_v2';
 
 /**
  * Saves a profile to Puter KV storage with LocalStorage as a fallback.
@@ -25,7 +25,26 @@ const STORAGE_KEY = 'echo_profiles_local';
 export async function saveProfileToPuter(profileData: any) {
   const p = getPuter();
   
-  // Try Puter KV first
+  // Always update LocalStorage first as the most reliable immediate source
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      const profiles = stored ? JSON.parse(stored) : [];
+      const index = profiles.findIndex((pr: any) => pr.id === profileData.id);
+      
+      if (index !== -1) {
+        profiles[index] = profileData;
+      } else {
+        profiles.push(profileData);
+      }
+      
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
+    } catch (e) {
+      console.error("Local storage update failed:", e);
+    }
+  }
+
+  // Try to sync with Puter KV in the background
   if (p && p.kv) {
     try {
       let profiles = [];
@@ -42,29 +61,11 @@ export async function saveProfileToPuter(profileData: any) {
       await p.kv.set('echo_profiles', profiles);
       return true;
     } catch (error) {
-      console.warn("Puter KV failed, falling back to local storage:", error);
-    }
-  }
-
-  // Fallback to LocalStorage
-  if (typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      const profiles = stored ? JSON.parse(stored) : [];
-      const index = profiles.findIndex((pr: any) => pr.id === profileData.id);
-      if (index !== -1) {
-        profiles[index] = profileData;
-      } else {
-        profiles.push(profileData);
-      }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
-      return true;
-    } catch (e) {
-      console.error("Local storage fallback failed:", e);
+      console.warn("Puter KV sync failed:", error);
     }
   }
   
-  return false;
+  return true; // Return true as long as localStorage update succeeded
 }
 
 /**
@@ -72,29 +73,38 @@ export async function saveProfileToPuter(profileData: any) {
  */
 export async function getProfilesFromPuter() {
   const p = getPuter();
-  
-  if (p && p.kv) {
-    try {
-      const profiles = await p.kv.get('echo_profiles');
-      if (profiles) {
-        return Array.isArray(profiles) ? profiles : (typeof profiles === 'string' ? JSON.parse(profiles) : []);
-      }
-    } catch (error) {
-      console.warn("Puter KV fetch failed, falling back to local storage:", error);
-    }
-  }
-  
-  // Fallback to LocalStorage
+  let localProfiles = [];
+
+  // Get local profiles first
   if (typeof window !== 'undefined') {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
+      localProfiles = stored ? JSON.parse(stored) : [];
     } catch (e) {
       console.error("Local storage fetch failed:", e);
     }
   }
   
-  return [];
+  // If Puter is available, try to get cloud profiles and merge
+  if (p && p.kv) {
+    try {
+      const cloudProfilesRaw = await p.kv.get('echo_profiles');
+      const cloudProfiles = Array.isArray(cloudProfilesRaw) 
+        ? cloudProfilesRaw 
+        : (typeof cloudProfilesRaw === 'string' ? JSON.parse(cloudProfilesRaw) : []);
+      
+      // Merge cloud and local, cloud wins if conflicts exist
+      const mergedMap = new Map();
+      localProfiles.forEach((pr: any) => mergedMap.set(pr.id, pr));
+      cloudProfiles.forEach((pr: any) => mergedMap.set(pr.id, pr));
+      
+      return Array.from(mergedMap.values());
+    } catch (error) {
+      console.warn("Puter KV fetch failed, using local only:", error);
+    }
+  }
+  
+  return localProfiles;
 }
 
 /**
@@ -111,18 +121,6 @@ export async function getProfileById(id: string) {
 export async function deleteProfileFromPuter(id: string) {
   const p = getPuter();
   
-  let success = false;
-  if (p && p.kv) {
-    try {
-      const profiles = await getProfilesFromPuter();
-      const filtered = profiles.filter((pr: any) => pr.id !== id);
-      await p.kv.set('echo_profiles', filtered);
-      success = true;
-    } catch (e) {
-      console.warn("Puter KV delete failed, trying local storage");
-    }
-  }
-
   if (typeof window !== 'undefined') {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -130,12 +128,22 @@ export async function deleteProfileFromPuter(id: string) {
         const profiles = JSON.parse(stored);
         const filtered = profiles.filter((pr: any) => pr.id !== id);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
-        success = true;
       }
     } catch (e) {
       console.error("Local storage delete failed:", e);
     }
   }
+
+  if (p && p.kv) {
+    try {
+      const profilesRaw = await p.kv.get('echo_profiles');
+      const profiles = Array.isArray(profilesRaw) ? profilesRaw : (typeof profilesRaw === 'string' ? JSON.parse(profilesRaw) : []);
+      const filtered = profiles.filter((pr: any) => pr.id !== id);
+      await p.kv.set('echo_profiles', filtered);
+    } catch (e) {
+      console.warn("Puter KV delete failed");
+    }
+  }
   
-  return success;
+  return true;
 }

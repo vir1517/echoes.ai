@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
-import { Plus, Heart, Sparkles, User, Settings } from "lucide-react";
+import { Heart, Sparkles, User, Settings, Plus } from "lucide-react";
 import Image from 'next/image';
 import { MOCK_LOVED_ONES, LovedOne } from '@/lib/mock-data';
 import { useEffect, useState } from 'react';
@@ -16,8 +16,7 @@ export default function Home() {
     async function loadProfiles() {
       try {
         const puterProfiles = await getProfilesFromPuter();
-        // Merge mock data with cloud data for a rich initial experience
-        // In a real production app, we would only show user's private profiles
+        // Merge mock data with cloud/local data for a rich initial experience
         const merged = [...puterProfiles];
         const existingIds = new Set(merged.map(p => p.id));
         
