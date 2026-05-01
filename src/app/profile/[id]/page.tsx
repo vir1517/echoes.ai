@@ -47,33 +47,54 @@ export default function ProfileDetail() {
     load();
   }, [id, router, toast]);
 
-  // Setup Web Speech API
+  // Setup Web Speech API once
   useEffect(() => {
-    if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+    if (typeof window !== 'undefined') {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = 'en-US';
+      
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
 
-      recognitionRef.current.onresult = async (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        handleAIResponse(transcript);
-      };
+        recognition.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          handleAIResponse(transcript);
+        };
 
-      recognitionRef.current.onend = () => {
-        if (orbState === 'listening') setOrbState('idle');
-      };
+        recognition.onend = () => {
+          setOrbState(prev => prev === 'listening' ? 'idle' : prev);
+        };
 
-      recognitionRef.current.onerror = (event: any) => {
-        console.error("Speech Recognition Error:", event.error);
-        setOrbState('idle');
-        if (event.error === 'not-allowed') {
-          toast({ title: "Microphone Access Denied", description: "Please enable microphone permissions in your browser.", variant: "destructive" });
-        }
-      };
+        recognition.onerror = (event: any) => {
+          console.error("Speech Recognition Error:", event.error);
+          setOrbState('idle');
+          if (event.error === 'not-allowed') {
+            toast({ 
+              title: "Microphone Access Denied", 
+              description: "Please enable microphone permissions in your browser to speak with the Echo.", 
+              variant: "destructive" 
+            });
+          } else if (event.error !== 'no-speech') {
+            toast({ 
+              title: "Speech Error", 
+              description: `Error: ${event.error}. Please try again.`, 
+              variant: "destructive" 
+            });
+          }
+        };
+
+        recognitionRef.current = recognition;
+      }
     }
-  }, [orbState, toast]);
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, [toast]);
 
   const handleAIResponse = async (userInput: string) => {
     if (!person) return;
@@ -103,7 +124,6 @@ export default function ProfileDetail() {
         setOrbState('speaking');
         await audio.play();
       } else {
-        // Fallback if no audio (though the flow should return it)
         setOrbState('idle');
       }
     } catch (error) {
@@ -117,11 +137,21 @@ export default function ProfileDetail() {
       recognitionRef.current?.stop();
     } else {
       if (!recognitionRef.current) {
-        toast({ title: "Speech not supported", description: "Your browser doesn't support voice recognition.", variant: "destructive" });
+        toast({ 
+          title: "Speech not supported", 
+          description: "Your browser doesn't support voice recognition. Please try using Chrome or Safari.", 
+          variant: "destructive" 
+        });
         return;
       }
-      setOrbState('listening');
-      recognitionRef.current.start();
+      
+      try {
+        setOrbState('listening');
+        recognitionRef.current.start();
+      } catch (e) {
+        console.error("Failed to start recognition:", e);
+        setOrbState('idle');
+      }
     }
   };
 
@@ -137,7 +167,6 @@ export default function ProfileDetail() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      {/* Sacred Header */}
       <header className="h-24 px-8 flex items-center justify-between glass sticky top-0 z-50">
         <div className="flex items-center gap-8">
           <Button variant="ghost" size="icon" onClick={() => router.push('/')} className="rounded-full bg-white/5 border border-white/5 hover:bg-accent/10 hover:text-accent transition-all">
@@ -168,10 +197,8 @@ export default function ProfileDetail() {
             </TabsList>
           </div>
 
-          {/* STORY TAB */}
           <TabsContent value="story" className="flex-1 max-w-7xl mx-auto w-full px-10 py-20 animate-in fade-in slide-in-from-bottom-6 duration-1000">
             <div className="grid lg:grid-cols-12 gap-20">
-              {/* Left Column: Media & Quick Info */}
               <div className="lg:col-span-4 space-y-16">
                 <div className="relative aspect-[3/4] rounded-[3.5rem] overflow-hidden border-2 border-primary shadow-[0_0_80px_rgba(0,0,0,0.6)] group">
                   <Image 
@@ -217,7 +244,6 @@ export default function ProfileDetail() {
                 </div>
               </div>
 
-              {/* Right Column: Narrative & Details */}
               <div className="lg:col-span-8 space-y-20">
                 <section className="space-y-10 relative">
                   <Quote className="absolute -top-10 -left-12 w-24 h-24 text-accent/5 -z-10" />
@@ -279,9 +305,7 @@ export default function ProfileDetail() {
             </div>
           </TabsContent>
 
-          {/* SPEAK TAB - THE SACRED SPACE */}
           <TabsContent value="speak" className="flex-1 flex flex-col items-center justify-center relative animate-in zoom-in-95 duration-[1500ms] overflow-hidden">
-            {/* Background Ambience */}
             <div className="absolute inset-0 pointer-events-none">
                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-accent/5 rounded-full blur-[200px] opacity-40 animate-pulse-slow" />
             </div>
