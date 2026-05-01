@@ -5,37 +5,48 @@ import { Button } from "@/components/ui/button";
 import { Heart, Sparkles, User, Settings, Plus } from "lucide-react";
 import Image from 'next/image';
 import { MOCK_LOVED_ONES, LovedOne } from '@/lib/mock-data';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { getProfilesFromPuter } from '@/lib/puter';
 
 export default function Home() {
   const [profiles, setProfiles] = useState<LovedOne[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    async function loadProfiles() {
-      try {
-        const puterProfiles = await getProfilesFromPuter();
-        // Merge mock data with cloud/local data for a rich initial experience
-        const merged = [...puterProfiles];
-        const existingIds = new Set(merged.map(p => p.id));
-        
-        MOCK_LOVED_ONES.forEach(mock => {
-          if (!existingIds.has(mock.id)) {
-            merged.push(mock);
-          }
-        });
-        
-        setProfiles(merged);
-      } catch (error) {
-        console.error("Failed to load family vault:", error);
-        setProfiles(MOCK_LOVED_ONES);
-      } finally {
-        setIsLoading(false);
-      }
+  const loadProfiles = useCallback(async () => {
+    try {
+      const puterProfiles = await getProfilesFromPuter();
+      // Merge mock data with cloud/local data for a rich initial experience
+      const merged = [...puterProfiles];
+      const existingIds = new Set(merged.map(p => p.id));
+      
+      MOCK_LOVED_ONES.forEach(mock => {
+        if (!existingIds.has(mock.id)) {
+          merged.push(mock);
+        }
+      });
+      
+      setProfiles(merged);
+    } catch (error) {
+      console.error("Failed to load family vault:", error);
+      setProfiles(MOCK_LOVED_ONES);
+    } finally {
+      setIsLoading(false);
     }
-    loadProfiles();
   }, []);
+
+  useEffect(() => {
+    loadProfiles();
+
+    // Listen for storage events to sync across tabs
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'echo_profiles_v3') {
+        loadProfiles();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [loadProfiles]);
 
   return (
     <div className="flex flex-col min-h-screen bg-background selection:bg-accent selection:text-accent-foreground">
