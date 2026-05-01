@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Upload, Users, Check, Loader2, Sparkles, Heart, Mic, Video, Image as ImageIcon, FileText, Plus, X } from "lucide-react";
+import { ArrowLeft, Upload, Users, Check, Loader2, Sparkles, Heart, Mic, Video, Image as ImageIcon, FileText, Plus, X, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,13 +13,17 @@ import { saveProfileToPuter } from '@/lib/puter';
 import { useToast } from "@/hooks/use-toast";
 import { mediaToPersonaGeneration } from '@/ai/flows/media-to-persona-generation';
 import { cn } from '@/lib/utils';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function CreateProfile() {
   const router = useRouter();
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const [step, setStep] = useState(1);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState("Weaving together their memories...");
+  const [validationError, setValidationError] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -34,6 +38,7 @@ export default function CreateProfile() {
 
   const [memories, setMemories] = useState<{type: string, content: string}[]>([]);
   const [newMemory, setNewMemory] = useState('');
+  const [artifacts, setArtifacts] = useState<{type: 'image' | 'video' | 'audio' | 'text', name: string, dataUri: string}[]>([]);
 
   const addMemory = () => {
     if (!newMemory.trim()) return;
@@ -45,7 +50,58 @@ export default function CreateProfile() {
     setMemories(memories.filter((_, i) => i !== index));
   };
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUri = event.target?.result as string;
+        let type: 'image' | 'video' | 'audio' | 'text' = 'text';
+        
+        if (file.type.startsWith('image/')) type = 'image';
+        else if (file.type.startsWith('video/')) type = 'video';
+        else if (file.type.startsWith('audio/')) type = 'audio';
+        
+        setArtifacts(prev => [...prev, {
+          type,
+          name: file.name,
+          dataUri
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removeArtifact = (index: number) => {
+    setArtifacts(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const validateStep = () => {
+    setValidationError(null);
+    if (step === 1) {
+      if (!formData.name.trim()) return "Please enter their name.";
+      if (!formData.birthYear) return "Please enter their birth year.";
+      if (!formData.passingYear) return "Please enter the year they passed away.";
+      if (!formData.relation) return "Please select your relationship.";
+      if (!formData.personality.trim()) return "Please describe their personality so we can learn who they were.";
+    }
+    if (step === 2) {
+      if (memories.length === 0 && artifacts.length === 0) {
+        return "Please share at least one memory or upload an artifact to help build their Echo.";
+      }
+    }
+    return null;
+  };
+
   const handleNext = async () => {
+    const error = validateStep();
+    if (error) {
+      setValidationError(error);
+      return;
+    }
+
     if (step < 4) {
       setStep(step + 1);
     } else {
@@ -54,7 +110,6 @@ export default function CreateProfile() {
       try {
         setProcessingStatus("Listening to their voice in recordings...");
         
-        // Construct detailed input for the AI based on user entries
         const textDocs = [
           `Name: ${formData.name}`,
           `Relation: They were the user's ${formData.relation}.`,
@@ -64,10 +119,16 @@ export default function CreateProfile() {
           ...memories.map(m => `Specific Memory: ${m.content}`)
         ];
 
-        // Call the AI Flow to analyze the persona
+        const imageDataUris = artifacts.filter(a => a.type === 'image').map(a => a.dataUri);
+        const videoDataUris = artifacts.filter(a => a.type === 'video').map(a => a.dataUri);
+        const audioDataUris = artifacts.filter(a => a.type === 'audio').map(a => a.dataUri);
+
         const personaData = await mediaToPersonaGeneration({
           lovedOneName: formData.name,
-          textDocuments: textDocs
+          textDocuments: textDocs,
+          imageDataUris: imageDataUris.length > 0 ? imageDataUris : undefined,
+          videoDataUris: videoDataUris.length > 0 ? videoDataUris : undefined,
+          audioDataUris: audioDataUris.length > 0 ? audioDataUris : undefined,
         });
 
         setProcessingStatus("Finalizing their Echo...");
@@ -78,7 +139,7 @@ export default function CreateProfile() {
           birthYear: parseInt(formData.birthYear) || 0,
           passingYear: parseInt(formData.passingYear) || 0,
           relation: formData.relation || 'Loved One',
-          avatarUrl: `https://picsum.photos/seed/${formData.name || 'new'}/600/600`,
+          avatarUrl: imageDataUris[0] || `https://picsum.photos/seed/${formData.name || 'new'}/600/600`,
           traits: personaData.personalityTraits,
           summary: personaData.overallSummary,
           birthPlace: formData.birthPlace || 'Unknown',
@@ -136,7 +197,7 @@ export default function CreateProfile() {
         <div className="w-12" />
       </header>
 
-      <main className="flex-1 max-w-4xl mx-auto w-full px-10 py-20 space-y-20">
+      <main className="flex-1 max-w-4xl mx-auto w-full px-10 py-20 space-y-12">
         <div className="flex items-center justify-between relative px-6">
           <div className="absolute top-5 left-0 right-0 h-px bg-white/10 -z-10 mx-16" />
           {steps.map((s) => (
@@ -158,6 +219,14 @@ export default function CreateProfile() {
             </div>
           ))}
         </div>
+
+        {validationError && (
+          <Alert variant="destructive" className="bg-destructive/10 border-destructive/20 text-destructive animate-in fade-in slide-in-from-top-2">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Required Information Missing</AlertTitle>
+            <AlertDescription>{validationError}</AlertDescription>
+          </Alert>
+        )}
 
         {isProcessing ? (
           <div className="flex flex-col items-center justify-center space-y-16 py-24 text-center animate-in fade-in duration-1000">
@@ -183,7 +252,7 @@ export default function CreateProfile() {
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                   <div className="space-y-5 md:col-span-2">
-                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Full Name</Label>
+                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Full Name *</Label>
                     <Input 
                       placeholder="Margaret Smith" 
                       className="bg-white/5 border-white/10 h-16 text-xl rounded-2xl px-6 focus:border-accent/50 focus:ring-accent/20"
@@ -192,7 +261,7 @@ export default function CreateProfile() {
                     />
                   </div>
                   <div className="space-y-5">
-                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Birth Year</Label>
+                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Birth Year *</Label>
                     <Input 
                       type="number" 
                       placeholder="1945" 
@@ -202,7 +271,7 @@ export default function CreateProfile() {
                     />
                   </div>
                   <div className="space-y-5">
-                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Passing Year</Label>
+                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Passing Year *</Label>
                     <Input 
                       type="number" 
                       placeholder="2020" 
@@ -212,8 +281,8 @@ export default function CreateProfile() {
                     />
                   </div>
                   <div className="space-y-5">
-                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Relationship</Label>
-                    <Select onValueChange={(val) => setFormData({...formData, relation: val})}>
+                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Relationship *</Label>
+                    <Select value={formData.relation} onValueChange={(val) => setFormData({...formData, relation: val})}>
                       <SelectTrigger className="bg-white/5 border-white/10 h-16 rounded-2xl px-6">
                         <SelectValue placeholder="Select connection" />
                       </SelectTrigger>
@@ -240,7 +309,7 @@ export default function CreateProfile() {
 
                 <div className="space-y-8 pt-8 border-t border-white/5">
                   <div className="space-y-5">
-                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Their Personality</Label>
+                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Their Personality *</Label>
                     <Textarea 
                       placeholder="He was quiet but funny. Very patient. Always had a story ready..." 
                       className="bg-white/5 border-white/10 min-h-[160px] rounded-[2rem] text-xl p-8 italic font-medium leading-relaxed"
@@ -270,6 +339,15 @@ export default function CreateProfile() {
 
             {step === 2 && (
               <div className="space-y-12">
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  className="hidden" 
+                  multiple 
+                  onChange={handleFileUpload}
+                  accept="image/*,video/*,audio/*,.pdf,.txt,.doc,.docx"
+                />
+                
                 <div className="space-y-3">
                   <h2 className="text-5xl font-bold text-white tracking-tight">Share their memories</h2>
                   <p className="text-muted-foreground text-xl italic font-medium opacity-60">"This is how we learn who they were."</p>
@@ -299,37 +377,60 @@ export default function CreateProfile() {
                         </Button>
                       </div>
                     ))}
-                    {memories.length === 0 && (
-                      <div className="p-12 border-2 border-dashed border-white/5 rounded-[2.5rem] text-center">
-                        <p className="text-muted-foreground font-medium italic">No memories added yet.</p>
-                      </div>
-                    )}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                  <button className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
+                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
                     <ImageIcon className="w-10 h-10 text-accent group-hover:scale-110 transition-transform" />
                     <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Photos</span>
                   </button>
-                  <button className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
+                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
                     <Video className="w-10 h-10 text-accent group-hover:scale-110 transition-transform" />
                     <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Videos</span>
                   </button>
-                  <button className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
+                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
                     <Mic className="w-10 h-10 text-accent group-hover:scale-110 transition-transform" />
                     <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Voice</span>
                   </button>
-                  <button className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
+                  <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group shadow-lg">
                     <FileText className="w-10 h-10 text-accent group-hover:scale-110 transition-transform" />
-                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Letters</span>
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">Documents</span>
                   </button>
                 </div>
 
-                <div className="p-16 border-2 border-dashed border-white/10 rounded-[3rem] flex flex-col items-center justify-center text-center gap-8 group hover:border-accent/30 hover:bg-white/[0.01] transition-all duration-700 shadow-inner">
+                {artifacts.length > 0 && (
+                  <div className="space-y-6">
+                    <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Uploaded Artifacts</Label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {artifacts.map((a, idx) => (
+                        <div key={idx} className="flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl group">
+                          <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center text-accent">
+                            {a.type === 'image' && <ImageIcon className="w-5 h-5" />}
+                            {a.type === 'video' && <Video className="w-5 h-5" />}
+                            {a.type === 'audio' && <Mic className="w-5 h-5" />}
+                            {a.type === 'text' && <FileText className="w-5 h-5" />}
+                          </div>
+                          <div className="flex-1 overflow-hidden">
+                            <p className="text-sm font-medium text-white truncate">{a.name}</p>
+                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{a.type}</p>
+                          </div>
+                          <Button variant="ghost" size="icon" onClick={() => removeArtifact(idx)} className="opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive rounded-full">
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-16 border-2 border-dashed border-white/10 rounded-[3rem] flex flex-col items-center justify-center text-center gap-8 group hover:border-accent/30 hover:bg-white/[0.01] transition-all duration-700 shadow-inner cursor-pointer"
+                >
                   <Upload className="w-16 h-16 text-muted-foreground group-hover:text-accent transition-all duration-700 group-hover:scale-110" />
                   <div className="space-y-3">
-                    <p className="text-2xl font-bold text-white tracking-tight">Drag and drop artifacts here</p>
+                    <p className="text-2xl font-bold text-white tracking-tight">Add artifacts here</p>
                     <p className="text-muted-foreground italic text-lg font-medium opacity-60">"Letters, voice notes, home movies, and portraits."</p>
                   </div>
                   <Button variant="outline" className="rounded-full border-white/20 px-10 h-14 font-bold tracking-widest uppercase text-xs hover:bg-white/10">Browse Archive</Button>
@@ -338,7 +439,7 @@ export default function CreateProfile() {
                 <div className="flex gap-6 p-8 bg-accent/5 rounded-[2rem] border border-accent/20">
                   <Heart className="w-8 h-8 text-accent shrink-0" />
                   <p className="text-sm leading-relaxed text-muted-foreground font-medium">
-                    <strong className="text-accent">A gentle tip:</strong> Adding context to artifacts helps the Echo remember more deeply. Every detail contributes to their digital spirit.
+                    <strong className="text-accent">A gentle tip:</strong> Sharing artifacts helps the Echo remember more deeply. Every detail contributes to their digital spirit.
                   </p>
                 </div>
               </div>
@@ -365,10 +466,6 @@ export default function CreateProfile() {
                       }}>Copy</Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4 p-6 bg-white/5 rounded-2xl border border-white/5 italic text-sm text-muted-foreground text-center justify-center">
-                    <Sparkles className="w-4 h-4 text-accent/40" />
-                    Anyone with this link can contribute their own memories to {formData.name || 'this profile'}.
-                  </div>
                 </div>
               </div>
             )}
@@ -380,12 +477,15 @@ export default function CreateProfile() {
                   <p className="text-muted-foreground text-xl italic font-medium opacity-60">"Everything is ready to begin."</p>
                 </div>
                 <div className="p-12 rounded-[3.5rem] bg-white/[0.02] border border-white/10 space-y-10 shadow-2xl overflow-hidden relative">
-                  {/* Subtle background element */}
                   <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-primary/5 rounded-full blur-[80px]" />
                   
                   <div className="flex items-center gap-8 relative z-10">
                     <div className="w-32 h-32 rounded-[2.5rem] bg-primary/20 overflow-hidden relative border-2 border-primary/40 flex items-center justify-center">
-                       <ImageIcon className="w-12 h-12 text-muted-foreground/30" />
+                       {artifacts.find(a => a.type === 'image') ? (
+                         <img src={artifacts.find(a => a.type === 'image')?.dataUri} className="object-cover w-full h-full" />
+                       ) : (
+                         <ImageIcon className="w-12 h-12 text-muted-foreground/30" />
+                       )}
                     </div>
                     <div className="space-y-2">
                       <h3 className="text-4xl font-bold text-white tracking-tight">{formData.name || 'Anonymous Loved One'}</h3>
@@ -401,17 +501,21 @@ export default function CreateProfile() {
                     </p>
                   </div>
                   
-                  {memories.length > 0 && (
-                    <div className="pt-8 border-t border-white/5 relative z-10">
-                      <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-accent/60">Contributed Memories</span>
-                      <p className="text-lg text-white/60 mt-3 font-medium">{memories.length} life snippets recorded so far.</p>
+                  <div className="pt-8 border-t border-white/5 relative z-10 flex gap-12">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-accent/60">Contributed Stories</span>
+                      <p className="text-lg text-white/60 mt-1 font-medium">{memories.length} life snippets</p>
                     </div>
-                  )}
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-accent/60">Artifacts</span>
+                      <p className="text-lg text-white/60 mt-1 font-medium">{artifacts.length} preserved items</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
 
-            <div className="flex gap-6 pt-16">
+            <div className="flex gap-6 pt-8">
               {step > 1 && (
                 <Button variant="ghost" size="lg" className="flex-1 rounded-full h-18 text-muted-foreground font-bold uppercase tracking-widest text-xs hover:bg-white/5" onClick={() => setStep(step - 1)}>
                   Back
