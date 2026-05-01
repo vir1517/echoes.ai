@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useRef } from 'react';
@@ -50,28 +51,65 @@ export default function CreateProfile() {
     setMemories(memories.filter((_, i) => i !== index));
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-
-    Array.from(files).forEach(file => {
+  // Helper to resize images on the client to reduce payload size
+  const resizeImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onload = (event) => {
-        const dataUri = event.target?.result as string;
-        let type: 'image' | 'video' | 'audio' | 'text' = 'text';
-        
-        if (file.type.startsWith('image/')) type = 'image';
-        else if (file.type.startsWith('video/')) type = 'video';
-        else if (file.type.startsWith('audio/')) type = 'audio';
-        
-        setArtifacts(prev => [...prev, {
-          type,
-          name: file.name,
-          dataUri
-        }]);
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 1200;
+
+          if (width > height && width > maxDim) {
+            height *= maxDim / width;
+            width = maxDim;
+          } else if (height > maxDim) {
+            width *= maxDim / height;
+            height = maxDim;
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.8));
+        };
+        img.src = e.target?.result as string;
       };
       reader.readAsDataURL(file);
     });
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    for (const file of Array.from(files)) {
+      let type: 'image' | 'video' | 'audio' | 'text' = 'text';
+      if (file.type.startsWith('image/')) type = 'image';
+      else if (file.type.startsWith('video/')) type = 'video';
+      else if (file.type.startsWith('audio/')) type = 'audio';
+
+      if (type === 'image') {
+        const optimizedUri = await resizeImage(file);
+        setArtifacts(prev => [...prev, { type, name: file.name, dataUri: optimizedUri }]);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setArtifacts(prev => [...prev, {
+            type,
+            name: file.name,
+            dataUri: event.target?.result as string
+          }]);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+    // Reset input so the same file can be uploaded again if needed
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const removeArtifact = (index: number) => {
@@ -169,7 +207,7 @@ export default function CreateProfile() {
         console.error("Error creating profile:", err);
         toast({
           title: "Processing Error",
-          description: "We encountered a hiccup while learning about them. Please try again.",
+          description: "The archive was too large or the connection was interrupted. Try uploading fewer artifacts at once.",
           variant: "destructive"
         });
         setIsProcessing(false);
@@ -196,6 +234,16 @@ export default function CreateProfile() {
         </div>
         <div className="w-12" />
       </header>
+
+      {/* Hidden file input always at root for ref stability */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        className="hidden" 
+        multiple 
+        onChange={handleFileUpload}
+        accept="image/*,video/*,audio/*,.pdf,.txt,.doc,.docx"
+      />
 
       <main className="flex-1 max-w-4xl mx-auto w-full px-10 py-20 space-y-12">
         <div className="flex items-center justify-between relative px-6">
@@ -339,15 +387,6 @@ export default function CreateProfile() {
 
             {step === 2 && (
               <div className="space-y-12">
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
-                  multiple 
-                  onChange={handleFileUpload}
-                  accept="image/*,video/*,audio/*,.pdf,.txt,.doc,.docx"
-                />
-                
                 <div className="space-y-3">
                   <h2 className="text-5xl font-bold text-white tracking-tight">Share their memories</h2>
                   <p className="text-muted-foreground text-xl italic font-medium opacity-60">"This is how we learn who they were."</p>
