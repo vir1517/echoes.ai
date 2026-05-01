@@ -1,3 +1,4 @@
+
 'use server';
 /**
  * @fileOverview This file implements a Genkit flow for processing various media types
@@ -11,6 +12,9 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 import {Part} from '@genkit-ai/ai'; // Import Part type for multimodal prompts
+
+// Increase the timeout for this specific server action to handle large media analysis
+export const maxDuration = 300; 
 
 // Input Schema
 const MediaToPersonaGenerationInputSchema = z.object({
@@ -50,17 +54,14 @@ const MediaToPersonaGenerationOutputSchema = z.object({
 });
 export type MediaToPersonaGenerationOutput = z.infer<typeof MediaToPersonaGenerationOutputSchema>;
 
-// The prompt definition will primarily contain the system instructions and the output schema format.
-// The actual media content will be passed dynamically to ai.generate as an array of Parts within the flow.
 const personaInstructionPrompt = ai.definePrompt({
   name: 'generateLovedOnePersonaInstructions',
   input: {
     schema: z.object({
       lovedOneName: z.string(),
-      outputSchemaDescription: z.string(), // To dynamically inject the schema description
+      outputSchemaDescription: z.string(),
     })
   },
-  // The output schema here is for Genkit metadata and tooling, not direct template rendering
   output: {schema: MediaToPersonaGenerationOutputSchema},
   prompt: `You are an AI persona analyst. Your task is to meticulously analyze all provided media content (audio, images, text, and video) related to a deceased loved one.
 Based on this analysis, you must construct a comprehensive conversational persona that accurately reflects their unique personality, core beliefs, and distinctive speaking style.
@@ -83,68 +84,46 @@ const mediaToPersonaGenerationFlow = ai.defineFlow(
   },
   async (input) => {
     const promptParts: Part[] = [];
-
-    // Dynamically generate the output schema description for the prompt
     const outputSchemaDescription = JSON.stringify(MediaToPersonaGenerationOutputSchema.shape, null, 2);
 
-    // Add the instruction text from the defined prompt, using the lovedOneName and schema description
     const instructionText = personaInstructionPrompt.prompt({
       lovedOneName: input.lovedOneName,
       outputSchemaDescription: outputSchemaDescription
     });
     promptParts.push({ text: instructionText });
 
-    // Add text documents if provided
     if (input.textDocuments && input.textDocuments.length > 0) {
-      promptParts.push({ text: `
---- ANALYZE THE FOLLOWING TEXT DOCUMENTS ---
-` });
+      promptParts.push({ text: `\n--- ANALYZE THE FOLLOWING TEXT DOCUMENTS ---\n` });
       input.textDocuments.forEach((doc, index) => {
-        promptParts.push({ text: `Document ${index + 1}:
-${doc}
-
-` });
+        promptParts.push({ text: `Document ${index + 1}:\n${doc}\n\n` });
       });
     }
 
-    // Add image data URIs if provided
     if (input.imageDataUris && input.imageDataUris.length > 0) {
-      promptParts.push({ text: `
---- ANALYZE THE FOLLOWING IMAGES ---
-` });
+      promptParts.push({ text: `\n--- ANALYZE THE FOLLOWING IMAGES ---\n` });
       input.imageDataUris.forEach((uri) => {
-        promptParts.push({ media: { url: uri } }); // Content type will be inferred by the model or Genkit if not specified in URI
+        promptParts.push({ media: { url: uri } });
       });
     }
 
-    // Add audio data URIs if provided
     if (input.audioDataUris && input.audioDataUris.length > 0) {
-      promptParts.push({ text: `
---- ANALYZE THE FOLLOWING AUDIO RECORDINGS ---
-` });
+      promptParts.push({ text: `\n--- ANALYZE THE FOLLOWING AUDIO RECORDINGS ---\n` });
       input.audioDataUris.forEach((uri) => {
-        // Attempt to infer content type from data URI, default to octet-stream
         const mimeTypeMatch = uri.match(/^data:(.*?);base64,/);
         const contentType = mimeTypeMatch ? mimeTypeMatch[1] : 'application/octet-stream';
         promptParts.push({ media: { url: uri, contentType: contentType } });
       });
     }
 
-    // Add video data URIs if provided
     if (input.videoDataUris && input.videoDataUris.length > 0) {
-      promptParts.push({ text: `
---- ANALYZE THE FOLLOWING VIDEO SNIPPETS ---
-` });
+      promptParts.push({ text: `\n--- ANALYZE THE FOLLOWING VIDEO SNIPPETS ---\n` });
       input.videoDataUris.forEach((uri) => {
-        // Attempt to infer content type from data URI, default to octet-stream
         const mimeTypeMatch = uri.match(/^data:(.*?);base64,/);
         const contentType = mimeTypeMatch ? mimeTypeMatch[1] : 'application/octet-stream';
         promptParts.push({ media: { url: uri, contentType: contentType } });
       });
     }
 
-    // Call ai.generate directly with the constructed promptParts array.
-    // It will use the default model configured in ai.genkit.ts (e.g., gemini-2.5-flash).
     const { output } = await ai.generate({
       prompt: promptParts,
       output: { schema: MediaToPersonaGenerationOutputSchema },
