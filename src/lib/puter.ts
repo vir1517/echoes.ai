@@ -1,15 +1,14 @@
+
 'use client';
 
 import puter from 'puter';
 
 /**
  * Puter Client Utility
- * Provides access to Puter.js cloud features like KV storage, AI, and Hosting.
+ * Provides access to Puter.js cloud features like KV storage.
  */
 export const getPuter = () => {
   if (typeof window !== 'undefined') {
-    // Handle ESM/CJS default import mismatch which often causes "undefined" property errors
-    // Also check for the browser global in case it's loaded via CDN
     const p = (puter as any).default || puter || (window as any).puter;
     return p;
   }
@@ -19,14 +18,12 @@ export const getPuter = () => {
 export async function saveProfileToPuter(profileData: any) {
   const p = getPuter();
   
-  // Defensive check for the Puter instance and the KV namespace
   if (!p || !p.kv) {
     console.error("Puter or Puter KV namespace is not available.");
     return false;
   }
   
   try {
-    // Retrieve existing profiles or start with an empty array
     let profiles = [];
     try {
       const stored = await p.kv.get('echo_profiles');
@@ -35,10 +32,15 @@ export async function saveProfileToPuter(profileData: any) {
       console.warn("Could not retrieve existing profiles, starting fresh.");
     }
 
-    const updatedProfiles = [...profiles, profileData];
+    // Check if profile exists to update, otherwise add
+    const index = profiles.findIndex((p: any) => p.id === profileData.id);
+    if (index !== -1) {
+      profiles[index] = profileData;
+    } else {
+      profiles.push(profileData);
+    }
     
-    // Save back to Puter's Key-Value store
-    await p.kv.set('echo_profiles', updatedProfiles);
+    await p.kv.set('echo_profiles', profiles);
     return true;
   } catch (error) {
     console.error("Error saving to Puter KV:", error);
@@ -60,4 +62,9 @@ export async function getProfilesFromPuter() {
     console.error("Error fetching from Puter KV:", error);
     return [];
   }
+}
+
+export async function getProfileById(id: string) {
+  const profiles = await getProfilesFromPuter();
+  return profiles.find((p: any) => p.id === id) || null;
 }

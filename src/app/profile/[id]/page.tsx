@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EchoOrb } from '@/components/echo-orb';
 import { conversationalPersonaInteraction } from '@/ai/flows/conversational-persona-interaction';
 import { useToast } from "@/hooks/use-toast";
-import { getProfilesFromPuter } from '@/lib/puter';
+import { getProfileById } from '@/lib/puter';
 import { cn } from '@/lib/utils';
 
 export default function ProfileDetail() {
@@ -23,19 +23,26 @@ export default function ProfileDetail() {
   const [activeTab, setActiveTab] = useState("story");
   const [orbState, setOrbState] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
   const [lastResponse, setLastResponse] = useState<string | null>(null);
+  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'model', content: string}[]>([]);
+  
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     async function load() {
-      const mock = MOCK_LOVED_ONES.find(p => p.id === id);
-      const cloud = await getProfilesFromPuter();
-      const found = cloud.find((p: any) => p.id === id) || mock;
-      if (found) {
-        setPerson(found);
-      } else {
-        toast({ title: "Profile not found", variant: "destructive" });
-        router.push('/');
+      try {
+        const cloudProfile = await getProfileById(id as string);
+        const mockProfile = MOCK_LOVED_ONES.find(p => p.id === id);
+        const found = cloudProfile || mockProfile;
+        
+        if (found) {
+          setPerson(found);
+        } else {
+          toast({ title: "Profile not found", variant: "destructive" });
+          router.push('/');
+        }
+      } catch (err) {
+        console.error("Failed to load profile:", err);
       }
     }
     load();
@@ -67,13 +74,16 @@ export default function ProfileDetail() {
     if (!person) return;
     setOrbState('thinking');
     try {
+      const newHistory = [...chatHistory, { role: 'user' as const, content: userInput }];
       const result = await conversationalPersonaInteraction({
         personaId: person.id,
         userInputText: userInput,
-        conversationHistory: [] 
+        conversationHistory: chatHistory
       });
 
+      setChatHistory([...newHistory, { role: 'model' as const, content: result.responseText }]);
       setLastResponse(result.responseText);
+      
       if (result.responseAudioDataUri) {
         const audio = new Audio(result.responseAudioDataUri);
         audioRef.current = audio;
@@ -197,30 +207,34 @@ export default function ProfileDetail() {
                   </div>
                 </section>
 
-                <section className="space-y-8">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Core Beliefs</h3>
-                  <div className="grid gap-4">
-                    {(person.beliefs || []).map((belief, idx) => (
-                      <div key={idx} className="p-6 bg-white/5 rounded-2xl border border-white/5 flex gap-4 items-start group hover:bg-white/10 transition-colors">
-                        <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-accent shrink-0 text-xs font-bold">
-                          {idx + 1}
+                {person.beliefs && person.beliefs.length > 0 && (
+                  <section className="space-y-8">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Core Beliefs</h3>
+                    <div className="grid gap-4">
+                      {person.beliefs.map((belief, idx) => (
+                        <div key={idx} className="p-6 bg-white/5 rounded-2xl border border-white/5 flex gap-4 items-start group hover:bg-white/10 transition-colors">
+                          <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-accent shrink-0 text-xs font-bold">
+                            {idx + 1}
+                          </div>
+                          <p className="text-lg text-white/80">{belief}</p>
                         </div>
-                        <p className="text-lg text-white/80">{belief}</p>
-                      </div>
-                    ))}
-                  </div>
-                </section>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
-                <section className="space-y-8">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Common Phrases</h3>
-                  <div className="flex flex-wrap gap-4">
-                    {(person.phrases || []).map((phrase, idx) => (
-                      <div key={idx} className="px-6 py-4 bg-primary/10 rounded-2xl border border-primary/20 italic text-white/70">
-                        "{phrase}"
-                      </div>
-                    ))}
-                  </div>
-                </section>
+                {person.phrases && person.phrases.length > 0 && (
+                  <section className="space-y-8">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Common Phrases</h3>
+                    <div className="flex flex-wrap gap-4">
+                      {person.phrases.map((phrase, idx) => (
+                        <div key={idx} className="px-6 py-4 bg-primary/10 rounded-2xl border border-primary/20 italic text-white/70">
+                          "{phrase}"
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
                 <section className="space-y-8 pb-12">
                   <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Memory Bank</h3>
@@ -251,7 +265,7 @@ export default function ProfileDetail() {
               
               <div className="h-40 flex items-center justify-center w-full">
                 {orbState === 'idle' && (
-                  <p className="text-muted-foreground/40 text-sm tracking-[0.3em] uppercase font-bold animate-pulse">Tap the microphone to speak</p>
+                  <p className="text-muted-foreground/40 text-sm tracking-[0.3em] uppercase font-bold animate-pulse">Tap the heart to speak</p>
                 )}
                 {orbState === 'listening' && (
                   <p className="text-accent text-xl font-bold tracking-widest uppercase flex items-center gap-3">

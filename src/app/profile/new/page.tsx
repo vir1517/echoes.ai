@@ -1,9 +1,10 @@
+
 "use client";
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Upload, Users, Check, Loader2, Sparkles, Heart, Mic, Video, Image as ImageIcon, FileText } from "lucide-react";
+import { ArrowLeft, Upload, Users, Check, Loader2, Sparkles, Heart, Mic, Video, Image as ImageIcon, FileText, Plus, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { saveProfileToPuter } from '@/lib/puter';
 import { useToast } from "@/hooks/use-toast";
 import { mediaToPersonaGeneration } from '@/ai/flows/media-to-persona-generation';
+import { cn } from '@/lib/utils';
 
 export default function CreateProfile() {
   const router = useRouter();
@@ -31,6 +33,19 @@ export default function CreateProfile() {
     hasAccent: false
   });
 
+  const [memories, setMemories] = useState<{type: string, content: string}[]>([]);
+  const [newMemory, setNewMemory] = useState('');
+
+  const addMemory = () => {
+    if (!newMemory.trim()) return;
+    setMemories([...memories, { type: 'text', content: newMemory }]);
+    setNewMemory('');
+  };
+
+  const removeMemory = (index: number) => {
+    setMemories(memories.filter((_, i) => i !== index));
+  };
+
   const handleNext = async () => {
     if (step < 4) {
       setStep(step + 1);
@@ -39,15 +54,17 @@ export default function CreateProfile() {
       
       try {
         setProcessingStatus("Listening to their voice in recordings...");
-        // In a real app, we'd pass actual media URIs here. 
-        // For now, we pass the personality text as the primary source of context.
+        
+        const textDocs = [
+          `Personality: ${formData.personality}`,
+          `Relation: They were the user's ${formData.relation}.`,
+          `Common Phrases: ${formData.phrases}`,
+          ...memories.map(m => m.content)
+        ];
+
         const personaData = await mediaToPersonaGeneration({
           lovedOneName: formData.name,
-          textDocuments: [
-            `Personality: ${formData.personality}`,
-            `Memories: They were remembered for their ${formData.relation} role and phrases like "${formData.phrases}".`,
-            `Birthplace: ${formData.birthPlace}`
-          ]
+          textDocuments: textDocs
         });
 
         setProcessingStatus("Finalizing their Echo...");
@@ -68,8 +85,9 @@ export default function CreateProfile() {
             ? personaData.speakingStyle.commonPhrases 
             : (formData.phrases ? formData.phrases.split(',').map(p => p.trim()) : []),
           beliefs: personaData.keyBeliefs,
-          events: [], // Would be populated from a real timeline processing
-          exampleDialogues: personaData.exampleDialogues
+          events: [], 
+          exampleDialogues: personaData.exampleDialogues,
+          memorySnippets: memories.map(m => m.content)
         };
 
         const success = await saveProfileToPuter(newProfile);
@@ -120,13 +138,17 @@ export default function CreateProfile() {
           <div className="absolute top-4 left-0 right-0 h-px bg-white/5 -z-10 mx-12" />
           {steps.map((s) => (
             <div key={s.id} className="flex flex-col items-center gap-3">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-500 ${
+              <div className={cn(
+                "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-500",
                 step >= s.id ? 'bg-accent text-accent-foreground scale-110 shadow-[0_0_15px_rgba(82,224,224,0.3)]' : 'bg-white/5 text-muted-foreground'
-              }`}>
+              )}>
                 {step > s.id ? <Check className="w-4 h-4" /> : s.id}
               </div>
               <div className="flex flex-col items-center">
-                <span className={`text-[10px] font-bold uppercase tracking-widest ${step >= s.id ? 'text-white' : 'text-muted-foreground'}`}>
+                <span className={cn(
+                  "text-[10px] font-bold uppercase tracking-widest",
+                  step >= s.id ? 'text-white' : 'text-muted-foreground'
+                )}>
                   {s.title}
                 </span>
               </div>
@@ -250,6 +272,33 @@ export default function CreateProfile() {
                   <p className="text-muted-foreground text-lg italic">"This is how we learn who they were."</p>
                 </div>
 
+                <div className="space-y-6">
+                  <Label className="text-xs uppercase tracking-widest font-bold opacity-60">Memory Snippets</Label>
+                  <div className="flex gap-2">
+                    <Input 
+                      placeholder="Share a story or memory..." 
+                      className="bg-white/5 border-white/5 h-14 rounded-xl"
+                      value={newMemory}
+                      onChange={(e) => setNewMemory(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addMemory()}
+                    />
+                    <Button onClick={addMemory} className="h-14 w-14 rounded-xl bg-accent text-accent-foreground">
+                      <Plus className="w-6 h-6" />
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-3">
+                    {memories.map((m, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-4 bg-white/5 border border-white/5 rounded-xl group">
+                        <p className="text-sm text-white/80 italic">"{m.content}"</p>
+                        <Button variant="ghost" size="icon" onClick={() => removeMemory(idx)} className="opacity-0 group-hover:opacity-100 transition-opacity">
+                          <X className="w-4 h-4 text-muted-foreground hover:text-destructive" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <button className="flex flex-col items-center justify-center p-8 rounded-[2rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-4">
                     <ImageIcon className="w-8 h-8 text-accent" />
@@ -272,7 +321,7 @@ export default function CreateProfile() {
                 <div className="p-12 border-2 border-dashed border-white/5 rounded-[2.5rem] flex flex-col items-center justify-center text-center gap-6 group hover:border-accent/20 transition-all">
                   <Upload className="w-12 h-12 text-muted-foreground group-hover:text-accent transition-colors" />
                   <div className="space-y-2">
-                    <p className="text-xl font-bold">Drag and drop memories here</p>
+                    <p className="text-xl font-bold">Drag and drop artifacts here</p>
                     <p className="text-sm text-muted-foreground italic">"Letters, voice notes, home movies, and portraits."</p>
                   </div>
                   <Button variant="outline" className="rounded-full border-white/10 mt-4">Browse Files</Button>
@@ -281,7 +330,7 @@ export default function CreateProfile() {
                 <div className="flex gap-4 p-6 bg-accent/5 rounded-2xl border border-accent/10">
                   <Heart className="w-6 h-6 text-accent shrink-0" />
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    <strong className="text-accent">A gentle tip:</strong> Adding context to photos—like who was there or what the occasion was—helps the Echo remember more deeply.
+                    <strong className="text-accent">A gentle tip:</strong> Adding context to artifacts helps the Echo remember more deeply.
                   </p>
                 </div>
               </div>
@@ -301,9 +350,9 @@ export default function CreateProfile() {
                   <div className="space-y-4">
                     <Label className="text-xs uppercase tracking-widest font-bold opacity-60">Secret Invite Link</Label>
                     <div className="flex gap-2">
-                      <Input readOnly value="echoes.app/invite/f829-x291-k911" className="bg-black/20 border-white/5 h-12 font-mono text-sm" />
+                      <Input readOnly value={`echoes.app/invite/v${Date.now().toString(36)}`} className="bg-black/20 border-white/5 h-12 font-mono text-sm" />
                       <Button className="bg-accent text-accent-foreground px-6 font-bold" onClick={() => {
-                        navigator.clipboard.writeText("echoes.app/invite/f829-x291-k911");
+                        navigator.clipboard.writeText("echoes.app/invite/share");
                         toast({ title: "Link Copied", description: "Share it with your family members." });
                       }}>Copy</Button>
                     </div>
@@ -327,15 +376,21 @@ export default function CreateProfile() {
                        <ImageIcon className="w-8 h-8 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-muted-foreground/30" />
                     </div>
                     <div className="space-y-1">
-                      <h3 className="text-2xl font-bold text-white">{formData.name || 'Margaret Smith'}</h3>
+                      <h3 className="text-2xl font-bold text-white">{formData.name || 'Anonymous Loved One'}</h3>
                       <p className="text-accent text-sm font-bold uppercase tracking-widest">
-                        {formData.relation || 'Mother'} • {formData.birthYear || '1945'} — {formData.passingYear || '2020'}
+                        {formData.relation || 'Family'} • {formData.birthYear || '—'} — {formData.passingYear || '—'}
                       </p>
                     </div>
                   </div>
                   <p className="text-muted-foreground leading-relaxed italic border-l-2 border-accent/40 pl-6 py-2">
-                    "{formData.personality || 'She was a force of nature, always in the garden or at the easel...'}"
+                    "{formData.personality || 'A life to be remembered...'}"
                   </p>
+                  {memories.length > 0 && (
+                    <div className="pt-4 border-t border-white/5">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Shared Artifacts</span>
+                      <p className="text-sm text-white/60 mt-1">{memories.length} memory snippets recorded.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
