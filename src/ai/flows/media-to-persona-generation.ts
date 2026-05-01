@@ -10,7 +10,6 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
-import {Part} from '@genkit-ai/ai'; // Import Part type for multimodal prompts
 
 // Input Schema
 const MediaToPersonaGenerationInputSchema = z.object({
@@ -50,28 +49,67 @@ const MediaToPersonaGenerationOutputSchema = z.object({
 });
 export type MediaToPersonaGenerationOutput = z.infer<typeof MediaToPersonaGenerationOutputSchema>;
 
-const personaInstructionPrompt = ai.definePrompt({
-  name: 'generateLovedOnePersonaInstructions',
+/**
+ * Prompt definition for generating the persona.
+ * Uses Handlebars templating to include multimodal inputs.
+ */
+const personaGenerationPrompt = ai.definePrompt({
+  name: 'generateLovedOnePersona',
   input: {
-    schema: z.object({
-      lovedOneName: z.string(),
-      outputSchemaDescription: z.string(),
-    })
+    schema: MediaToPersonaGenerationInputSchema
   },
-  output: {schema: MediaToPersonaGenerationOutputSchema},
+  output: {
+    schema: MediaToPersonaGenerationOutputSchema
+  },
   prompt: `You are an AI persona analyst. Your task is to meticulously analyze all provided media content (audio, images, text, and video) related to a deceased loved one.
 Based on this analysis, you must construct a comprehensive conversational persona that accurately reflects their unique personality, core beliefs, and distinctive speaking style.
 Pay close attention to nuances in language, recurring themes, emotional expression, and any verbal or non-verbal cues present in the media.
 
-Your final response MUST be a JSON object conforming strictly to the following structure, describing the persona of "{{{lovedOneName}}}":
+The loved one's name is: {{lovedOneName}}
 
-{{{outputSchemaDescription}}}`,
+{{#if textDocuments}}
+--- ANALYZE THE FOLLOWING TEXT DOCUMENTS ---
+{{#each textDocuments}}
+Document {{@index}}:
+{{{this}}}
+
+{{/each}}
+{{/if}}
+
+{{#if imageDataUris}}
+--- ANALYZE THE FOLLOWING IMAGES ---
+{{#each imageDataUris}}
+{{media url=this}}
+{{/each}}
+{{/if}}
+
+{{#if audioDataUris}}
+--- ANALYZE THE FOLLOWING AUDIO RECORDINGS ---
+{{#each audioDataUris}}
+{{media url=this}}
+{{/each}}
+{{/if}}
+
+{{#if videoDataUris}}
+--- ANALYZE THE FOLLOWING VIDEO SNIPPETS ---
+{{#each videoDataUris}}
+{{media url=this}}
+{{/each}}
+{{/if}}
+
+Please output the persona analysis as a structured JSON object according to the specified schema.`,
 });
 
+/**
+ * Wrapper function to initiate the persona generation process.
+ */
 export async function mediaToPersonaGeneration(input: MediaToPersonaGenerationInput): Promise<MediaToPersonaGenerationOutput> {
   return mediaToPersonaGenerationFlow(input);
 }
 
+/**
+ * Genkit Flow for generating a persona from media assets.
+ */
 const mediaToPersonaGenerationFlow = ai.defineFlow(
   {
     name: 'mediaToPersonaGenerationFlow',
@@ -79,50 +117,8 @@ const mediaToPersonaGenerationFlow = ai.defineFlow(
     outputSchema: MediaToPersonaGenerationOutputSchema,
   },
   async (input) => {
-    const promptParts: Part[] = [];
-    const outputSchemaDescription = JSON.stringify(MediaToPersonaGenerationOutputSchema.shape, null, 2);
-
-    const instructionText = personaInstructionPrompt.prompt({
-      lovedOneName: input.lovedOneName,
-      outputSchemaDescription: outputSchemaDescription
-    });
-    promptParts.push({ text: instructionText });
-
-    if (input.textDocuments && input.textDocuments.length > 0) {
-      promptParts.push({ text: `\n--- ANALYZE THE FOLLOWING TEXT DOCUMENTS ---\n` });
-      input.textDocuments.forEach((doc, index) => {
-        promptParts.push({ text: `Document ${index + 1}:\n${doc}\n\n` });
-      });
-    }
-
-    if (input.imageDataUris && input.imageDataUris.length > 0) {
-      promptParts.push({ text: `\n--- ANALYZE THE FOLLOWING IMAGES ---\n` });
-      input.imageDataUris.forEach((uri) => {
-        promptParts.push({ media: { url: uri } });
-      });
-    }
-
-    if (input.audioDataUris && input.audioDataUris.length > 0) {
-      promptParts.push({ text: `\n--- ANALYZE THE FOLLOWING AUDIO RECORDINGS ---\n` });
-      input.audioDataUris.forEach((uri) => {
-        const mimeTypeMatch = uri.match(/^data:(.*?);base64,/);
-        const contentType = mimeTypeMatch ? mimeTypeMatch[1] : 'application/octet-stream';
-        promptParts.push({ media: { url: uri, contentType: contentType } });
-      });
-    }
-
-    if (input.videoDataUris && input.videoDataUris.length > 0) {
-      promptParts.push({ text: `\n--- ANALYZE THE FOLLOWING VIDEO SNIPPETS ---\n` });
-      input.videoDataUris.forEach((uri) => {
-        const mimeTypeMatch = uri.match(/^data:(.*?);base64,/);
-        const contentType = mimeTypeMatch ? mimeTypeMatch[1] : 'application/octet-stream';
-        promptParts.push({ media: { url: uri, contentType: contentType } });
-      });
-    }
-
-    const { output } = await ai.generate({
-      prompt: promptParts,
-      output: { schema: MediaToPersonaGenerationOutputSchema },
+    // Call the defined prompt with the input and specific configuration
+    const { output } = await personaGenerationPrompt(input, {
       config: {
         safetySettings: [
           { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
