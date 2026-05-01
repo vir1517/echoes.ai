@@ -1,10 +1,11 @@
+
 "use client";
 
 import { useParams, useRouter } from 'next/navigation';
 import { useState, useRef, useEffect } from 'react';
 import { MOCK_LOVED_ONES, LovedOne } from '@/lib/mock-data';
 import { Button } from "@/components/ui/button";
-import { Mic, ArrowLeft, History, Heart, Share2, Calendar, MapPin, Sparkles, BookOpen } from "lucide-react";
+import { Mic, ArrowLeft, Share2, Calendar, MapPin, Sparkles, BookOpen, Quote, Heart } from "lucide-react";
 import Image from 'next/image';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EchoOrb } from '@/components/echo-orb';
@@ -28,19 +29,19 @@ export default function ProfileDetail() {
   useEffect(() => {
     async function load() {
       const mock = MOCK_LOVED_ONES.find(p => p.id === id);
-      if (mock) {
-        setPerson(mock);
+      const cloud = await getProfilesFromPuter();
+      const found = cloud.find((p: any) => p.id === id) || mock;
+      if (found) {
+        setPerson(found);
       } else {
-        const cloud = await getProfilesFromPuter();
-        const found = cloud.find((p: any) => p.id === id);
-        if (found) setPerson(found);
+        toast({ title: "Profile not found", variant: "destructive" });
+        router.push('/');
       }
     }
     load();
-  }, [id]);
+  }, [id, router, toast]);
 
   useEffect(() => {
-    // Setup Speech Recognition
     if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       recognitionRef.current = new SpeechRecognition();
@@ -52,12 +53,15 @@ export default function ProfileDetail() {
         handleAIResponse(transcript);
       };
 
+      recognitionRef.current.onend = () => {
+        if (orbState === 'listening') setOrbState('idle');
+      };
+
       recognitionRef.current.onerror = () => {
         setOrbState('idle');
-        toast({ title: "Microphone Error", description: "Could not hear you. Please try again.", variant: "destructive" });
       };
     }
-  }, []);
+  }, [orbState]);
 
   const handleAIResponse = async (userInput: string) => {
     if (!person) return;
@@ -66,7 +70,7 @@ export default function ProfileDetail() {
       const result = await conversationalPersonaInteraction({
         personaId: person.id,
         userInputText: userInput,
-        conversationHistory: [] // Should be state-managed history
+        conversationHistory: [] 
       });
 
       setLastResponse(result.responseText);
@@ -99,7 +103,12 @@ export default function ProfileDetail() {
     }
   };
 
-  if (!person) return <div className="min-h-screen flex items-center justify-center">Loading Profile...</div>;
+  if (!person) return (
+    <div className="min-h-screen flex flex-col items-center justify-center space-y-4">
+      <div className="w-12 h-12 border-4 border-accent/20 border-t-accent rounded-full animate-spin" />
+      <p className="text-muted-foreground animate-pulse">Entering the Vault...</p>
+    </div>
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -122,54 +131,108 @@ export default function ProfileDetail() {
 
       <main className="flex-1 flex flex-col">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex-1 flex flex-col">
-          <div className="flex justify-center py-6">
+          <div className="flex justify-center py-6 glass bg-white/[0.02]">
             <TabsList className="bg-white/5 rounded-full p-1 border border-white/5 h-12">
               <TabsTrigger value="story" className="rounded-full px-8 data-[state=active]:bg-primary data-[state=active]:text-white">
                 <BookOpen className="w-4 h-4 mr-2" /> Their Story
               </TabsTrigger>
               <TabsTrigger value="speak" className="rounded-full px-8 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground">
-                <Mic className="w-4 h-4 mr-2" /> Speak With Them
+                <Sparkles className="w-4 h-4 mr-2" /> Speak With Them
               </TabsTrigger>
             </TabsList>
           </div>
 
-          <TabsContent value="story" className="flex-1 max-w-7xl mx-auto w-full px-8 py-8 animate-in fade-in duration-700">
+          <TabsContent value="story" className="flex-1 max-w-6xl mx-auto w-full px-8 py-12 animate-in fade-in slide-in-from-bottom-4 duration-1000">
             <div className="grid md:grid-cols-3 gap-16">
               <div className="space-y-12">
-                <div className="relative aspect-[4/5] rounded-[2.5rem] overflow-hidden border-2 border-primary shadow-2xl group">
-                  <Image src={person.avatarUrl} alt={person.name} fill className="object-cover grayscale group-hover:grayscale-0 transition-all duration-1000" />
+                <div className="relative aspect-[3/4] rounded-[2.5rem] overflow-hidden border-2 border-primary shadow-2xl group">
+                  <Image 
+                    src={person.avatarUrl} 
+                    alt={person.name} 
+                    fill 
+                    className="object-cover grayscale group-hover:grayscale-0 transition-all duration-1000 scale-105 group-hover:scale-100" 
+                    data-ai-hint="portrait elderly"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent opacity-60" />
                 </div>
-                <div className="space-y-8">
-                  <div className="space-y-4">
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Snapshot</h3>
-                    <div className="space-y-3">
+                
+                <div className="space-y-8 bg-white/5 p-8 rounded-[2rem] border border-white/5">
+                  <div className="space-y-6">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-accent flex items-center gap-2">
+                      <Sparkles className="w-3 h-3" /> Snapshot
+                    </h3>
+                    <div className="space-y-4">
                       <div className="flex items-center gap-3 text-muted-foreground">
                         <Calendar className="w-4 h-4 text-primary" />
-                        <span className="text-sm">{person.birthYear} — {person.passingYear}</span>
+                        <span className="text-sm font-medium">{person.birthYear} — {person.passingYear}</span>
                       </div>
                       <div className="flex items-center gap-3 text-muted-foreground">
                         <MapPin className="w-4 h-4 text-primary" />
-                        <span className="text-sm">Born in {person.birthPlace}</span>
+                        <span className="text-sm font-medium">{person.birthPlace}</span>
                       </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Personality</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {(person.traits || []).map(trait => (
+                        <span key={trait} className="text-[10px] px-3 py-1 rounded-full bg-primary/20 text-white/70 border border-white/5 uppercase tracking-tighter">
+                          {trait}
+                        </span>
+                      ))}
                     </div>
                   </div>
                 </div>
               </div>
 
               <div className="md:col-span-2 space-y-16">
-                <section className="space-y-6">
+                <section className="space-y-8 relative">
+                  <Quote className="absolute -top-6 -left-8 w-16 h-16 text-accent/10 -z-10" />
                   <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Biography</h3>
-                  <p className="text-2xl font-medium leading-relaxed text-white/90 italic">
-                    {person.summary}
-                  </p>
+                  <div className="space-y-6">
+                    <p className="text-2xl font-medium leading-relaxed text-white/90 italic first-letter:text-5xl first-letter:font-bold first-letter:mr-3 first-letter:float-left">
+                      {person.summary}
+                    </p>
+                  </div>
                 </section>
 
                 <section className="space-y-8">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Core Beliefs</h3>
+                  <div className="grid gap-4">
+                    {(person.beliefs || []).map((belief, idx) => (
+                      <div key={idx} className="p-6 bg-white/5 rounded-2xl border border-white/5 flex gap-4 items-start group hover:bg-white/10 transition-colors">
+                        <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-accent shrink-0 text-xs font-bold">
+                          {idx + 1}
+                        </div>
+                        <p className="text-lg text-white/80">{belief}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="space-y-8">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Common Phrases</h3>
+                  <div className="flex flex-wrap gap-4">
+                    {(person.phrases || []).map((phrase, idx) => (
+                      <div key={idx} className="px-6 py-4 bg-primary/10 rounded-2xl border border-primary/20 italic text-white/70">
+                        "{phrase}"
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="space-y-8 pb-12">
                   <h3 className="text-xs font-bold uppercase tracking-widest text-accent">Memory Bank</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-6">
                     {[...Array(6)].map((_, i) => (
-                      <div key={i} className="aspect-square relative rounded-3xl overflow-hidden border border-white/5 hover:scale-[1.05] transition-all duration-500 cursor-pointer group">
-                        <Image src={`https://picsum.photos/seed/mem-${i+10}/400/400`} alt="Memory" fill className="object-cover grayscale group-hover:grayscale-0 transition-all duration-700" />
+                      <div key={i} className="aspect-square relative rounded-3xl overflow-hidden border border-white/5 hover:scale-[1.05] transition-all duration-500 cursor-pointer group shadow-xl">
+                        <Image 
+                          src={`https://picsum.photos/seed/mem-${person.id}-${i}/400/400`} 
+                          alt="Memory" 
+                          fill 
+                          className="object-cover grayscale group-hover:grayscale-0 transition-all duration-700" 
+                        />
                       </div>
                     ))}
                   </div>
@@ -180,24 +243,34 @@ export default function ProfileDetail() {
 
           <TabsContent value="speak" className="flex-1 flex flex-col items-center justify-center relative animate-in zoom-in-95 duration-1000">
             <div className="absolute inset-0 pointer-events-none overflow-hidden">
-               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-accent/5 rounded-full blur-[150px] opacity-40" />
+               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-accent/5 rounded-full blur-[150px] opacity-40 animate-pulse-slow" />
             </div>
 
-            <div className="z-10 flex flex-col items-center gap-16 max-w-md text-center">
+            <div className="z-10 flex flex-col items-center gap-16 max-w-2xl text-center px-8">
               <EchoOrb state={orbState} />
               
-              <div className="h-32 flex items-center justify-center">
+              <div className="h-40 flex items-center justify-center w-full">
                 {orbState === 'idle' && (
-                  <p className="text-muted-foreground/60 text-sm tracking-widest uppercase font-medium">Tap to begin speaking</p>
+                  <p className="text-muted-foreground/40 text-sm tracking-[0.3em] uppercase font-bold animate-pulse">Tap the microphone to speak</p>
                 )}
                 {orbState === 'listening' && (
-                  <p className="text-accent text-lg font-bold animate-pulse tracking-widest uppercase">Listening...</p>
+                  <p className="text-accent text-xl font-bold tracking-widest uppercase flex items-center gap-3">
+                    <span className="w-2 h-2 rounded-full bg-accent animate-ping" />
+                    Listening
+                  </p>
                 )}
                 {orbState === 'thinking' && (
-                  <p className="text-muted-foreground italic text-lg animate-pulse">Recalling memories...</p>
+                  <div className="flex flex-col items-center gap-4">
+                    <p className="text-muted-foreground italic text-xl">Recalling memories...</p>
+                    <div className="flex gap-1.5">
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]" />
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]" />
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" />
+                    </div>
+                  </div>
                 )}
                 {orbState === 'speaking' && lastResponse && (
-                  <p className="text-2xl text-white/90 font-medium italic leading-relaxed animate-in fade-in slide-in-from-bottom-4 duration-1000">
+                  <p className="text-3xl text-white/90 font-medium italic leading-relaxed animate-in fade-in slide-in-from-bottom-6 duration-1000 max-w-xl">
                     "{lastResponse}"
                   </p>
                 )}
@@ -207,18 +280,27 @@ export default function ProfileDetail() {
                 onClick={handleSpeak}
                 disabled={orbState === 'thinking' || orbState === 'speaking'}
                 className={cn(
-                  "w-24 h-24 rounded-full flex items-center justify-center transition-all duration-500 border-2",
-                  orbState === 'listening' ? "bg-accent border-accent text-accent-foreground scale-110 shadow-[0_0_50px_rgba(82,224,224,0.4)]" : "bg-white/5 border-white/10 text-white hover:bg-white/10"
+                  "w-28 h-28 rounded-full flex items-center justify-center transition-all duration-700 border-2 relative group",
+                  orbState === 'listening' 
+                    ? "bg-accent border-accent text-accent-foreground scale-110 shadow-[0_0_80px_rgba(82,224,224,0.5)]" 
+                    : "bg-white/5 border-white/10 text-white hover:bg-white/10 hover:scale-105"
                 )}
               >
-                <Mic className={cn("w-10 h-10", orbState === 'listening' && "animate-pulse")} />
+                <div className={cn(
+                  "absolute inset-0 rounded-full border border-accent animate-ping opacity-0",
+                  orbState === 'listening' && "opacity-40"
+                )} />
+                <Mic className={cn("w-12 h-12 transition-all duration-500", orbState === 'listening' && "scale-110")} />
               </button>
             </div>
 
-            <div className="absolute bottom-12 left-0 right-0 text-center px-8">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] opacity-40">
-                Responses are woven from their own words, stories, and memories — not invented.
-              </p>
+            <div className="absolute bottom-12 left-0 right-0 text-center px-12">
+              <div className="flex flex-col items-center gap-3 opacity-40 hover:opacity-100 transition-opacity">
+                <Heart className="w-4 h-4 text-accent" />
+                <p className="text-[10px] text-muted-foreground uppercase tracking-[0.25em] max-w-md mx-auto leading-loose font-bold">
+                  Responses are woven from their own words, stories, and memories — not invented.
+                </p>
+              </div>
             </div>
           </TabsContent>
         </Tabs>
