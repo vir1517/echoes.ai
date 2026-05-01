@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { MOCK_LOVED_ONES, LovedOne } from '@/lib/mock-data';
 import { Button } from "@/components/ui/button";
-import { Mic, ArrowLeft, Share2, Calendar, MapPin, Sparkles, BookOpen, Quote, Volume2, Heart } from "lucide-react";
+import { Mic, ArrowLeft, Share2, Calendar, MapPin, Sparkles, BookOpen, Quote, Volume2 } from "lucide-react";
 import Image from 'next/image';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EchoOrb } from '@/components/echo-orb';

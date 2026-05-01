@@ -18,5 +18,6 @@ export interface LovedOne {
 
 /**
  * Empty by default to ensure only user-added profiles are displayed.
+ * This acts as the fallback for local storage.
  */
 export const MOCK_LOVED_ONES: LovedOne[] = [];

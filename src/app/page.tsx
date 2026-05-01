@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from 'next/link';
@@ -26,13 +27,12 @@ export default function Home() {
   useEffect(() => {
     loadProfiles();
 
-    // Listen for storage events to sync across tabs
+    // Listen for storage events (cross-tab sync) and custom sync events (same-tab)
     const handleSync = () => {
       loadProfiles();
     };
 
     window.addEventListener('storage', handleSync);
-    // Custom event check for same-tab updates
     window.addEventListener('profile-updated', handleSync);
     
     return () => {
@@ -43,7 +43,6 @@ export default function Home() {
 
   return (
     <div className="flex flex-col min-h-screen bg-background selection:bg-accent selection:text-accent-foreground">
-      {/* Sacred Header */}
       <header className="px-8 h-24 flex items-center justify-between glass sticky top-0 z-50">
         <Link href="/" className="flex flex-col group">
           <h1 className="text-3xl font-bold tracking-tighter text-white transition-colors group-hover:text-accent">Echoes</h1>
@@ -83,7 +82,6 @@ export default function Home() {
                 href={`/profile/${person.id}`}
                 className="group relative bg-card/20 border border-white/5 rounded-[3rem] p-10 transition-all hover:bg-card/40 hover:border-accent/30 hover:scale-[1.03] duration-700 shadow-2xl overflow-hidden"
               >
-                {/* Subtle background glow */}
                 <div className="absolute -top-24 -right-24 w-48 h-48 bg-accent/5 rounded-full blur-[60px] group-hover:bg-accent/10 transition-colors duration-700" />
                 
                 <div className="flex flex-col items-center text-center space-y-8 relative z-10">
