@@ -1,3 +1,4 @@
+
 'use client';
 
 import * as puter from 'puter';
@@ -15,7 +16,7 @@ export const getPuter = () => {
   return null;
 };
 
-const STORAGE_KEY = 'echo_profiles_v3';
+const STORAGE_KEY = 'echo_profiles_v4';
 
 /**
  * Saves a profile to Puter KV storage with LocalStorage as a primary source of truth.
@@ -38,8 +39,9 @@ export async function saveProfileToPuter(profileData: any) {
       
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
       
-      // Dispatch a storage event manually so the same tab can listen if needed
+      // Dispatch events for synchronization
       window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new CustomEvent('profile-updated'));
     } catch (e) {
       console.error("Local storage update failed:", e);
     }
@@ -136,6 +138,7 @@ export async function deleteProfileFromPuter(id: string) {
         const filtered = profiles.filter((pr: any) => pr.id !== id);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
         window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new CustomEvent('profile-updated'));
       }
     } catch (e) {
       console.error("Local storage delete failed:", e);

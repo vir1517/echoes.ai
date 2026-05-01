@@ -1,7 +1,8 @@
+
 "use client";
 
 import { useParams, useRouter } from 'next/navigation';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { MOCK_LOVED_ONES, LovedOne } from '@/lib/mock-data';
 import { Button } from "@/components/ui/button";
 import { Mic, ArrowLeft, Share2, Calendar, MapPin, Sparkles, BookOpen, Quote, Volume2, Heart } from "lucide-react";
@@ -47,68 +48,7 @@ export default function ProfileDetail() {
     load();
   }, [id, router, toast]);
 
-  // Initialize Web Speech API with better error handling and lifecycle management
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      
-      if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        recognition.lang = 'en-US';
-
-        recognition.onstart = () => {
-          setOrbState('listening');
-        };
-
-        recognition.onresult = (event: any) => {
-          const transcript = event.results[0][0].transcript;
-          if (transcript) {
-            handleAIResponse(transcript);
-          } else {
-            setOrbState('idle');
-          }
-        };
-
-        recognition.onerror = (event: any) => {
-          console.error("Speech Recognition Error:", event.error);
-          setOrbState('idle');
-          if (event.error === 'not-allowed') {
-            toast({ 
-              title: "Microphone Access Denied", 
-              description: "Please enable microphone permissions to speak.", 
-              variant: "destructive" 
-            });
-          } else if (event.error !== 'no-speech') {
-            toast({ 
-              title: "Recognition Error", 
-              description: `Something went wrong: ${event.error}`, 
-              variant: "destructive" 
-            });
-          }
-        };
-
-        recognition.onend = () => {
-          // Only reset if we aren't processing a result
-          setOrbState(prev => (prev === 'listening' ? 'idle' : prev));
-        };
-
-        recognitionRef.current = recognition;
-      }
-    }
-
-    return () => {
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch (e) {}
-      }
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-    };
-  }, [toast]);
-
-  const handleAIResponse = async (userInput: string) => {
+  const handleAIResponse = useCallback(async (userInput: string) => {
     if (!person) return;
     
     setOrbState('thinking');
@@ -163,7 +103,68 @@ export default function ProfileDetail() {
         variant: "destructive" 
       });
     }
-  };
+  }, [person, chatHistory, toast]);
+
+  // Use a ref to the latest handleAIResponse to avoid stale closures in the speech recognition setup
+  const responseHandlerRef = useRef(handleAIResponse);
+  useEffect(() => {
+    responseHandlerRef.current = handleAIResponse;
+  }, [handleAIResponse]);
+
+  // Initialize Web Speech API
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+
+        recognition.onstart = () => {
+          setOrbState('listening');
+        };
+
+        recognition.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          if (transcript) {
+            // Call via ref to get latest state/logic
+            responseHandlerRef.current(transcript);
+          } else {
+            setOrbState('idle');
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          console.error("Speech Recognition Error:", event.error);
+          setOrbState('idle');
+          if (event.error === 'not-allowed') {
+            toast({ 
+              title: "Microphone Access Denied", 
+              description: "Please enable microphone permissions to speak.", 
+              variant: "destructive" 
+            });
+          }
+        };
+
+        recognition.onend = () => {
+          setOrbState(prev => (prev === 'listening' ? 'idle' : prev));
+        };
+
+        recognitionRef.current = recognition;
+      }
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (e) {}
+      }
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+    };
+  }, [toast]);
 
   const handleSpeak = () => {
     if (orbState === 'listening') {
