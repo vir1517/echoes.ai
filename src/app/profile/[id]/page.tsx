@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useParams, useRouter } from 'next/navigation';
@@ -47,7 +48,7 @@ export default function ProfileDetail() {
     load();
   }, [id, router, toast]);
 
-  // Setup Web Speech API once
+  // Initialize Web Speech API
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -63,7 +64,12 @@ export default function ProfileDetail() {
           handleAIResponse(transcript);
         };
 
+        recognition.onstart = () => {
+          setOrbState('listening');
+        };
+
         recognition.onend = () => {
+          // If we didn't move to thinking, go back to idle
           setOrbState(prev => prev === 'listening' ? 'idle' : prev);
         };
 
@@ -73,13 +79,7 @@ export default function ProfileDetail() {
           if (event.error === 'not-allowed') {
             toast({ 
               title: "Microphone Access Denied", 
-              description: "Please enable microphone permissions in your browser to speak with the Echo.", 
-              variant: "destructive" 
-            });
-          } else if (event.error !== 'no-speech') {
-            toast({ 
-              title: "Speech Error", 
-              description: `Error: ${event.error}. Please try again.`, 
+              description: "Please enable microphone permissions to speak.", 
               variant: "destructive" 
             });
           }
@@ -93,42 +93,58 @@ export default function ProfileDetail() {
       if (recognitionRef.current) {
         recognitionRef.current.stop();
       }
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
     };
   }, [toast]);
 
   const handleAIResponse = async (userInput: string) => {
     if (!person) return;
+    
     setOrbState('thinking');
+    
     try {
-      const historyForAI = chatHistory.map(h => ({ role: h.role, content: h.content }));
+      // Pass the existing history to maintain context
       const result = await conversationalPersonaInteraction({
         personaId: person.id,
         userInputText: userInput,
-        conversationHistory: historyForAI
+        conversationHistory: chatHistory
       });
 
-      setChatHistory(prev => [
-        ...prev, 
-        { role: 'user', content: userInput },
-        { role: 'model', content: result.responseText }
-      ]);
+      // Update history with both the user's input and AI's response
+      const newHistory = [
+        ...chatHistory, 
+        { role: 'user' as const, content: userInput },
+        { role: 'model' as const, content: result.responseText }
+      ];
+      setChatHistory(newHistory);
       setLastResponse(result.responseText);
       
       if (result.responseAudioDataUri) {
         const audio = new Audio(result.responseAudioDataUri);
         audioRef.current = audio;
+        
+        audio.onplay = () => {
+          setOrbState('speaking');
+        };
+
         audio.onended = () => {
           setOrbState('idle');
-          setLastResponse(null);
         };
-        setOrbState('speaking');
+
         await audio.play();
       } else {
         setOrbState('idle');
       }
     } catch (error) {
+      console.error("AI Response Error:", error);
       setOrbState('idle');
-      toast({ title: "Memory stream disconnected", description: "The connection to their echo was interrupted.", variant: "destructive" });
+      toast({ 
+        title: "Connection Interrupted", 
+        description: "The memory stream was lost. Please try again.", 
+        variant: "destructive" 
+      });
     }
   };
 
@@ -138,15 +154,18 @@ export default function ProfileDetail() {
     } else {
       if (!recognitionRef.current) {
         toast({ 
-          title: "Speech not supported", 
-          description: "Your browser doesn't support voice recognition. Please try using Chrome or Safari.", 
+          title: "Speech Not Supported", 
+          description: "Your browser doesn't support voice recognition. Try Chrome or Safari.", 
           variant: "destructive" 
         });
         return;
       }
       
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+
       try {
-        setOrbState('listening');
         recognitionRef.current.start();
       } catch (e) {
         console.error("Failed to start recognition:", e);
@@ -209,9 +228,6 @@ export default function ProfileDetail() {
                     data-ai-hint="portrait elderly"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent opacity-60" />
-                  <div className="absolute bottom-10 left-1/2 -translate-x-1/2">
-                     <span className="text-[10px] font-bold text-white uppercase tracking-[0.4em] opacity-40">Original Portrait</span>
-                  </div>
                 </div>
                 
                 <div className="space-y-10 bg-white/[0.02] p-10 rounded-[3rem] border border-white/5">
@@ -296,7 +312,6 @@ export default function ProfileDetail() {
                           className="object-cover grayscale group-hover:grayscale-0 transition-all duration-1000" 
                           data-ai-hint="old photo"
                         />
-                        <div className="absolute inset-0 bg-accent/0 group-hover:bg-accent/10 transition-colors duration-700" />
                       </div>
                     ))}
                   </div>
@@ -323,7 +338,6 @@ export default function ProfileDetail() {
                       <span className="w-3 h-3 rounded-full bg-accent animate-ping" />
                       Listening
                     </p>
-                    <p className="text-muted-foreground text-xs italic tracking-widest opacity-60">"Tell me a story about..."</p>
                   </div>
                 )}
                 {orbState === 'thinking' && (
@@ -371,7 +385,7 @@ export default function ProfileDetail() {
               <div className="flex flex-col items-center gap-4 opacity-40 hover:opacity-100 transition-opacity duration-1000">
                 <Heart className="w-5 h-5 text-accent" />
                 <p className="text-[10px] text-muted-foreground uppercase tracking-[0.3em] max-w-md mx-auto leading-loose font-bold">
-                  Responses are woven from their own words, stories, and memories — not invented.
+                  Responses are woven from their own words and memories.
                 </p>
               </div>
             </div>
