@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState } from 'react';
@@ -8,7 +7,7 @@ import { ArrowLeft, Upload, Users, Check, Loader2, Sparkles, Heart, Mic, Video, 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/select";
 import { Switch } from "@/components/ui/switch";
 import { saveProfileToPuter } from '@/lib/puter';
 import { useToast } from "@/hooks/use-toast";
@@ -35,35 +34,49 @@ export default function CreateProfile() {
     } else {
       setIsProcessing(true);
       
-      // Construct the memory profile data
       const newProfile = {
         id: `profile-${Date.now()}`,
-        ...formData,
-        avatarUrl: 'https://picsum.photos/seed/new/400/400', 
-        traits: ['Newly Created'],
+        name: formData.name,
+        birthYear: parseInt(formData.birthYear) || 0,
+        passingYear: parseInt(formData.passingYear) || 0,
+        relation: formData.relation || 'Loved One',
+        avatarUrl: `https://picsum.photos/seed/${formData.name || 'new'}/400/400`,
+        traits: ['Newly Created', 'Family Echo'],
         summary: formData.personality || 'A life remembered with love.',
+        birthPlace: formData.birthPlace || 'Unknown',
+        languages: ['English'],
+        occupation: 'Family Member',
+        phrases: formData.phrases ? formData.phrases.split(',').map(p => p.trim()) : [],
+        beliefs: [],
         events: []
       };
 
-      // Integrate with Puter.js for cloud storage
-      const success = await saveProfileToPuter(newProfile);
-      
-      setTimeout(() => {
+      try {
+        const success = await saveProfileToPuter(newProfile);
+        
         if (success) {
           toast({
             title: "Echo Created",
-            description: "Their memory is now preserved in your vault.",
+            description: "Their memory is now preserved in your family vault.",
           });
           router.push('/');
         } else {
           toast({
-            title: "Creation Error",
-            description: "We couldn't reach the cloud. Please check your connection.",
+            title: "Cloud Sync Error",
+            description: "We couldn't reach the cloud to save this profile. Please try again.",
             variant: "destructive"
           });
           setIsProcessing(false);
         }
-      }, 4000);
+      } catch (err) {
+        console.error("Error creating profile:", err);
+        setIsProcessing(false);
+        toast({
+          title: "System Error",
+          description: "An unexpected error occurred. Please refresh and try again.",
+          variant: "destructive"
+        });
+      }
     }
   };
 

@@ -1,4 +1,3 @@
-
 "use client";
 
 import Link from 'next/link';
@@ -14,9 +13,18 @@ export default function Home() {
 
   useEffect(() => {
     async function loadProfiles() {
-      const puterProfiles = await getProfilesFromPuter();
-      if (puterProfiles && puterProfiles.length > 0) {
-        setProfiles([...MOCK_LOVED_ONES, ...puterProfiles]);
+      try {
+        const puterProfiles = await getProfilesFromPuter();
+        if (puterProfiles && Array.isArray(puterProfiles) && puterProfiles.length > 0) {
+          setProfiles(prev => {
+            // Merge mock data with cloud data, avoiding duplicates by ID
+            const existingIds = new Set(prev.map(p => p.id));
+            const uniqueNew = puterProfiles.filter(p => !existingIds.has(p.id));
+            return [...prev, ...uniqueNew];
+          });
+        }
+      } catch (error) {
+        console.error("Failed to load cloud profiles:", error);
       }
     }
     loadProfiles();
