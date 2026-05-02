@@ -14,6 +14,28 @@ export interface LovedOne {
   phrases: string[];
   beliefs: string[];
   events: { year: number; title: string; description: string }[];
+  artifacts?: PersonaArtifact[];
+  voiceSampleDataUri?: string;
+  voiceSampleName?: string;
+  voiceProfile?: {
+    hasReferenceAudio: boolean;
+    accent: string;
+    styleNotes: string;
+  };
+  inferenceNotes?: string[];
+  sourceEvidence?: string[];
+}
+
+export interface PersonaArtifact {
+  type: 'image' | 'video' | 'audio' | 'text';
+  name: string;
+  dataUri: string;
+  userContext?: string;
+  extractedText?: string;
+  transcript?: string;
+  analysis?: string;
+  size?: number;
+  mimeType?: string;
 }
 
 /**

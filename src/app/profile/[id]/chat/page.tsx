@@ -1,21 +1,22 @@
 
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { MOCK_LOVED_ONES } from '@/lib/mock-data';
+import { LovedOne } from '@/lib/mock-data';
 import { Button } from "@/components/ui/button";
 import { Mic, X, MoreVertical, Volume2, Info } from "lucide-react";
 import Image from 'next/image';
 import { VoiceVisualizer } from '@/components/voice-visualizer';
-import { conversationalPersonaInteraction } from '@/ai/flows/conversational-persona-interaction';
 import { useToast } from "@/hooks/use-toast";
+import { converseWithPersona, speakWithBrowserTTS, unlockClonedVoiceAudio } from '@/lib/local-ai';
+import { getProfileById } from '@/lib/storage';
 
 export default function EchoConversation() {
   const { id } = useParams();
   const router = useRouter();
   const { toast } = useToast();
-  const person = MOCK_LOVED_ONES.find(p => p.id === id);
+  const [person, setPerson] = useState<LovedOne | null>(null);
   
   const [isListening, setIsListening] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
@@ -23,7 +24,13 @@ export default function EchoConversation() {
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'model', content: string}[]>([]);
   const [lastResponse, setLastResponse] = useState<string | null>(null);
   
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    async function loadProfile() {
+      const profile = await getProfileById(id as string);
+      setPerson(profile as LovedOne | null);
+    }
+    loadProfile();
+  }, [id]);
 
   useEffect(() => {
     // Initial greeting simulation
@@ -35,9 +42,10 @@ export default function EchoConversation() {
     return () => clearTimeout(timer);
   }, []);
 
-  if (!person) return <div>Profile not found</div>;
+  if (!person) return <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground">Loading Echo...</div>;
 
   const handleMicClick = async () => {
+    unlockClonedVoiceAudio();
     if (isListening) {
       setIsListening(false);
       // Mock finishing the sentence for the demo
@@ -45,8 +53,17 @@ export default function EchoConversation() {
       
       try {
         const mockUserInput = "Tell me about that summer you spent in the mountains.";
-        const result = await conversationalPersonaInteraction({
+        const result = await converseWithPersona({
           personaId: person.id,
+          personaContext: {
+            name: person.name,
+            summary: person.summary,
+            traits: person.traits || [],
+            phrases: person.phrases || [],
+            sourceEvidence: person.sourceEvidence || [],
+            voiceProfile: person.voiceProfile,
+            voiceSampleDataUri: person.voiceSampleDataUri,
+          },
           userInputText: mockUserInput,
           conversationHistory: chatHistory
         });
@@ -58,17 +75,14 @@ export default function EchoConversation() {
 
         setLastResponse(result.responseText);
         
-        // Play audio
-        if (result.responseAudioDataUri) {
-          const audio = new Audio(result.responseAudioDataUri);
-          audioRef.current = audio;
-          audio.onended = () => {
+        await speakWithBrowserTTS(result.responseText, person.voiceSampleDataUri, {
+          onStart: () => setIsPlaying(true),
+          onEnd: () => {
             setIsPlaying(false);
             setLastResponse(null);
-          };
-          setIsPlaying(true);
-          await audio.play();
-        }
+          },
+          expectClonedVoice: Boolean(person.voiceProfile?.hasReferenceAudio),
+        });
       } catch (error) {
         toast({
           title: "Interaction Error",
