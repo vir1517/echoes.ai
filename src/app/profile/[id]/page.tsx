@@ -10,7 +10,7 @@ import { EchoOrb } from '@/components/echo-orb';
 import { useToast } from "@/hooks/use-toast";
 import { cn } from '@/lib/utils';
 import { getProfileById, deleteProfile } from '@/lib/storage';
-import { converseWithPersona, speakWithBrowserTTS, initAudioContext } from '@/lib/local-ai';
+import { converseWithPersona, deleteVoiceboxProfile, speakWithBrowserTTS, initAudioContext } from '@/lib/local-ai';
 import { buildProfileEvidence } from '@/lib/local-ai';
 import type { LovedOne } from '@/lib/mock-data';
 
@@ -107,8 +107,8 @@ export default function ProfileDetail() {
     initAudioContext();
 
     if (orbState === 'speaking') {
+      // Stop any ongoing TTS
       window.speechSynthesis.cancel();
-      if (audioCtx) audioCtx.close().then(() => audioCtx = null);
       setOrbState('idle');
       return;
     }
@@ -127,6 +127,13 @@ export default function ProfileDetail() {
   const handleDelete = async () => {
     if (!person) return;
     if (!confirm(`Delete ${person.name}'s Echo?`)) return;
+    if (person.voiceSampleDataUri) {
+      const voiceDeleted = await deleteVoiceboxProfile(person.voiceSampleDataUri);
+      if (!voiceDeleted) {
+        toast({ title: "Voicebox Delete Failed", description: "The Echo was not deleted because its cloned voice profile could not be removed.", variant: "destructive" });
+        return;
+      }
+    }
     const deleted = await deleteProfile(person.id);
     if (deleted) {
       toast({ title: "Echo Deleted" });

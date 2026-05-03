@@ -15,7 +15,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { PersonaArtifact } from '@/lib/mock-data';
-import { generatePersona } from '@/lib/local-ai';
+import { speakPersona, cloneVoice } from '@/lib/local-ai';
 import { saveProfile, getProfileById } from '@/lib/storage';
 
 function CreateProfileForm() {
@@ -40,7 +40,7 @@ function CreateProfileForm() {
   const [newMemory, setNewMemory] = useState('');
   const [artifacts, setArtifacts] = useState<PersonaArtifact[]>([]);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
-  const [speakerId, setSpeakerId] = useState<string | null>(null);
+  const [speakerId, setSpeakerId] = useState<string | null>(null); // Voicebox profile id
 
   useEffect(() => {
     if (!editId) return;
@@ -122,18 +122,25 @@ function CreateProfileForm() {
     return `[Unsupported file type: ${file.name}]`;
   };
 
-  const cloneVoice = async (audioFile: File): Promise<string | null> => {
+  const handleVoiceUpload = async (audioFile: File): Promise<string | null> => {
     try {
-      const form = new FormData();
-      form.append('file', audioFile);
-      const res = await fetch('http://localhost:5001/upload_voice', {
-        method: 'POST',
-        body: form,
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data.speaker_id || null;
-    } catch {
+      const isMp3 = audioFile.type === 'audio/mpeg' || audioFile.name.toLowerCase().endsWith('.mp3');
+      if (!isMp3) {
+        toast({ title: "MP3 Required", description: "Voice cloning currently expects an .mp3 voice sample.", variant: "destructive" });
+        return null;
+      }
+
+      setUploadStatus(`Creating Voicebox voice for ${formData.name || 'this profile'}...`);
+      const voiceboxProfileId = await cloneVoice(audioFile, formData.name || audioFile.name);
+      if (!voiceboxProfileId) {
+        toast({ title: "Voice Clone Failed", description: "Could not create the Voicebox profile. Make sure the bridge and Voicebox are running.", variant: "destructive" });
+        return null;
+      }
+
+      toast({ title: "Voice Cloned", description: "Voicebox profile created and linked to this Echo." });
+      return voiceboxProfileId;
+    } catch (err) {
+      console.error(err);
       return null;
     }
   };
@@ -149,22 +156,21 @@ function CreateProfileForm() {
       else if (file.type.startsWith('audio/')) type = 'audio';
 
       try {
-        if (type === 'audio') {
-          setUploadStatus(`Cloning voice from ${file.name}...`);
-          const sid = await cloneVoice(file);
-          if (sid) {
-            setSpeakerId(sid);
-            toast({ title: "Voice Cloned", description: "The AI will speak using this voice." });
-          } else {
-            toast({ title: "Cloning Failed", description: "Voice cloning server not available. Will use browser default.", variant: "destructive" });
-          }
-        }
-
-        const dataUri = type === 'image' ? await resizeImage(file) : await readAsDataUri(file);
+        const dataUri = type === 'audio'
+          ? ''
+          : type === 'image'
+            ? await resizeImage(file)
+            : await readAsDataUri(file);
         let extractedText = '';
-        if (type === 'text' || type === 'audio') {
+        if (type === 'text') {
           extractedText = await extractTextFromFile(file);
         }
+
+        if (type === 'audio') {
+          const voicePath = await handleVoiceUpload(file);
+          if (voicePath) setSpeakerId(voicePath);
+        }
+
         setArtifacts(prev => [...prev, {
           type,
           name: file.name,
@@ -191,7 +197,7 @@ function CreateProfileForm() {
       if (!formData.birthYear) return "Please enter their birth year.";
       if (!formData.passingYear) return "Please enter the year they passed away.";
       if (!formData.relation) return "Please select your relationship to them.";
-      if (!formData.personality.trim() || formData.personality.length < 10) return "Please provide a brief description of their personality (at least 10 characters).";
+      if (!formData.personality.trim() || formData.personality.length < 10) return "Please provide a brief description of their personality.";
     }
     if (step === 2) {
       if (memories.length === 0 && artifacts.length === 0) return "Please share at least one memory or upload an artifact.";
@@ -217,7 +223,7 @@ function CreateProfileForm() {
       ];
 
       const imageUris = artifacts.filter(a => a.type === 'image').map(a => a.dataUri);
-      const personaData = await generatePersona({
+      const personaData = await speakPersona({
         lovedOneName: formData.name,
         textDocuments: textDocs,
         artifacts,
@@ -248,7 +254,7 @@ function CreateProfileForm() {
         voiceSampleName: artifacts.find(a => a.type === 'audio')?.name,
         voiceProfile: {
           hasReferenceAudio: !!speakerId,
-          accent: speakerId ? 'Cloned voice' : 'US English',
+          accent: 'US English',
           styleNotes: personaData.speakingStyle.cadenceDescription,
         },
         sourceEvidence: [],
@@ -256,14 +262,14 @@ function CreateProfileForm() {
 
       const success = await saveProfile(newProfile);
       if (success) {
-        toast({ title: isEditing ? "Echo Updated" : "Echo Created", description: "Their memory is now preserved in your family vault." });
+        toast({ title: isEditing ? "Echo Updated" : "Echo Created", description: "Their memory is now preserved." });
         router.push(isEditing ? `/profile/${editId}` : '/');
       } else {
         throw new Error("Could not save profile.");
       }
     } catch (err) {
       console.error(err);
-      toast({ title: "Processing Error", description: "The AI service may be offline. Make sure Ollama is running.", variant: "destructive" });
+      toast({ title: "Processing Error", description: "The AI service may be offline.", variant: "destructive" });
     } finally {
       setIsProcessing(false);
     }
@@ -288,12 +294,10 @@ function CreateProfileForm() {
         </div>
         <div className="w-12" />
       </header>
-
       <input type="file" ref={fileInputRef} className="hidden" multiple onChange={handleFileUpload}
         accept="image/*,video/*,audio/*,.pdf,.txt,.doc,.docx" />
 
       <main className="flex-1 max-w-4xl mx-auto w-full px-10 py-20 space-y-12">
-        {/* Step indicators */}
         <div className="flex items-center justify-between relative px-6">
           <div className="absolute top-5 left-0 right-0 h-px bg-white/10 -z-10 mx-16" />
           {steps.map(s => (
@@ -308,7 +312,7 @@ function CreateProfileForm() {
         </div>
 
         {validationError && (
-          <Alert variant="destructive" className="bg-destructive/10 border-destructive/20 animate-in fade-in slide-in-from-top-2">
+          <Alert variant="destructive" className="bg-destructive/10 border-destructive/20">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Action Required</AlertTitle>
             <AlertDescription>{validationError}</AlertDescription>
@@ -328,7 +332,6 @@ function CreateProfileForm() {
           </div>
         ) : (
           <div className="space-y-16 animate-in fade-in slide-in-from-bottom-10 duration-1000">
-            {/* Step 1: Identity */}
             {step === 1 && (
               <div className="space-y-12">
                 <h2 className="text-5xl font-bold text-white tracking-tight">{isEditing ? 'Update their identity' : 'Who were they?'}</h2>
@@ -375,7 +378,6 @@ function CreateProfileForm() {
               </div>
             )}
 
-            {/* Step 2: Memories & Artifacts */}
             {step === 2 && (
               <div className="space-y-12">
                 <h2 className="text-5xl font-bold text-white tracking-tight">{isEditing ? 'Add more memories' : 'Share their memories'}</h2>
@@ -387,7 +389,7 @@ function CreateProfileForm() {
                   </div>
                   <div className="grid gap-4">
                     {memories.map((m, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-6 bg-white/5 border border-white/10 rounded-2xl group animate-in slide-in-from-right-4">
+                      <div key={idx} className="flex items-center justify-between p-6 bg-white/5 border border-white/10 rounded-2xl group">
                         <p className="text-lg text-white/90 italic">"{m.content}"</p>
                         <Button variant="ghost" size="icon" onClick={() => removeMemory(idx)} className="opacity-0 group-hover:opacity-100 hover:text-destructive"><X className="w-5 h-5" /></Button>
                       </div>
@@ -404,11 +406,6 @@ function CreateProfileForm() {
                   ))}
                 </div>
                 {uploadStatus && <div className="p-4 rounded-xl bg-accent/10 border border-accent/20 text-sm text-accent font-medium animate-pulse">{uploadStatus}</div>}
-                {speakerId && (
-                  <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/20 text-sm text-green-400 font-medium flex items-center gap-2">
-                    <Mic className="w-4 h-4" /> Voice cloned successfully! (ID: {speakerId.slice(0, 8)}...)
-                  </div>
-                )}
                 {artifacts.length > 0 && (
                   <div className="space-y-6">
                     <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Artifacts Collection</Label>
@@ -441,28 +438,25 @@ function CreateProfileForm() {
               </div>
             )}
 
-            {/* Step 3: Invite */}
             {step === 3 && (
               <div className="space-y-12 text-center">
-                <div className="w-24 h-24 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-10 shadow-2xl"><Users className="w-12 h-12 text-accent" /></div>
-                <h2 className="text-5xl font-bold text-white tracking-tight">Invite the family</h2>
-                <p className="text-muted-foreground text-xl italic font-medium opacity-60">"Remembrance is a shared journey."</p>
-                <div className="bg-white/[0.02] p-12 rounded-[3rem] border border-white/10 space-y-10 shadow-2xl max-w-lg mx-auto">
+                <div className="w-24 h-24 rounded-full bg-accent/10 flex items-center justify-center mx-auto"><Users className="w-12 h-12 text-accent" /></div>
+                <h2 className="text-5xl font-bold">Invite the family</h2>
+                <p className="text-muted-foreground italic">"Remembrance is a shared journey."</p>
+                <div className="bg-white/[0.02] p-12 rounded-[3rem] border border-white/10 max-w-lg mx-auto">
                   <Label className="text-[10px] uppercase tracking-[0.3em] font-bold text-accent/80">Private Vault Link</Label>
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 mt-4">
                     <Input readOnly value={`echoes.app/invite/v${Date.now().toString(36)}`} className="bg-black/40 border-white/10 h-14 font-mono text-sm px-6 rounded-xl" />
-                    <Button onClick={() => { navigator.clipboard.writeText(`echoes.app/invite/v${Date.now().toString(36)}`); toast({ title: "Link Copied" }); }} className="bg-accent text-accent-foreground px-10 font-bold h-14 rounded-xl shadow-xl hover:bg-accent/90">Copy</Button>
+                    <Button onClick={() => { navigator.clipboard.writeText(`echoes.app/invite/v${Date.now().toString(36)}`); toast({ title: "Link Copied" }); }} className="bg-accent text-accent-foreground h-14 rounded-xl shadow-xl">Copy</Button>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Step 4: Review */}
             {step === 4 && (
               <div className="space-y-12">
-                <h2 className="text-5xl font-bold text-white tracking-tight">Final Look</h2>
-                <div className="p-12 rounded-[3.5rem] bg-white/[0.02] border border-white/10 space-y-10 shadow-2xl relative overflow-hidden">
-                  <div className="absolute -bottom-20 -right-20 w-64 h-64 bg-primary/5 rounded-full blur-[80px]" />
+                <h2 className="text-5xl font-bold">Final Look</h2>
+                <div className="p-12 rounded-[3.5rem] bg-white/[0.02] border border-white/10 relative overflow-hidden">
                   <div className="flex items-center gap-8 relative z-10">
                     <div className="w-32 h-32 rounded-[2.5rem] bg-primary/20 overflow-hidden border-2 border-primary/40">
                       {artifacts.find(a => a.type === 'image')?.dataUri ? (
@@ -471,10 +465,10 @@ function CreateProfileForm() {
                         <ImageIcon className="w-12 h-12 text-muted-foreground/30 mx-auto mt-10" />
                       )}
                     </div>
-                    <div className="space-y-2">
-                      <h3 className="text-4xl font-bold text-white tracking-tight">{formData.name}</h3>
+                    <div>
+                      <h3 className="text-4xl font-bold">{formData.name}</h3>
                       <p className="text-accent text-sm font-bold uppercase tracking-[0.3em]">{formData.relation} • {formData.birthYear} — {formData.passingYear}</p>
-                      {speakerId && <p className="text-green-400 text-xs mt-1">🎙️ Voice cloned</p>}
+                      {speakerId && <p className="text-green-400 text-xs mt-1">Voicebox profile linked</p>}
                     </div>
                   </div>
                 </div>

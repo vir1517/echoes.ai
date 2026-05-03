@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+**/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -39,6 +40,11 @@ next-env.d.ts
 
 .genkit/*
 .env*
+
+# local runtime voice data
+tts-server/voices/*
+!tts-server/voices/.gitkeep
+voice-server/uploads/
 
 # firebase
 firebase-debug.log

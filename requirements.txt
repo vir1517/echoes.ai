@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Installing Echoes app dependencies..."
+npm install
+
+echo "Installing bridge server dependencies..."
+(cd bridge && npm install)
+
+if [ -d "voice-server" ] && [ -f "voice-server/package.json" ]; then
+  echo "Installing voice-server dependencies..."
+  (cd voice-server && npm install)
+fi
+
+echo ""
+echo "Done."
+echo ""
+echo "To run the app:"
+echo "  npm run dev"
+echo ""
+echo "To run the Voicebox bridge:"
+echo "  cd bridge && npm start"
+echo ""
+echo "Also make sure these local services are running:"
+echo "  Voicebox API: http://127.0.0.1:17493"
+echo "  Ollama API:   http://127.0.0.1:11434"

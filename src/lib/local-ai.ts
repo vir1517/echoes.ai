@@ -2,11 +2,10 @@
 
 import type { LovedOne, PersonaArtifact } from '@/lib/mock-data';
 
-/* ----------------------------- Ollama helpers ----------------------------- */
-
+/* ---------- Ollama helpers (unchanged) ---------- */
 async function chooseOllamaModel(): Promise<string | null> {
   try {
-    const res = await fetch('http://localhost:11434/api/tags');
+    const res = await fetch('http://localhost:3001/api/tags');
     if (!res.ok) return null;
     const data = await res.json();
     const models: string[] = (data.models || []).map((m: any) => m.name);
@@ -20,44 +19,24 @@ async function chooseOllamaModel(): Promise<string | null> {
 
 async function ollamaChat(prompt: string, format?: 'json'): Promise<string> {
   const model = await chooseOllamaModel();
-  if (!model) {
-    console.warn('[Ollama] No model found');
-    return '';
-  }
+  if (!model) { console.warn('[Ollama] No model found'); return ''; }
   const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    console.warn('[Ollama] Request timed out after 15s');
-    controller.abort();
-  }, 15000);
+  setTimeout(() => controller.abort(), 15000);
   try {
-    console.log(`[Ollama] Sending request to model ${model}...`);
-    const res = await fetch('http://localhost:11434/api/generate', {
+    const res = await fetch('http://localhost:3001/api/speak', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        prompt,
-        stream: false,
-        format,
-        options: { temperature: format === 'json' ? 0.2 : 0.7, top_p: 0.9 }
-      })
+      body: JSON.stringify({ model, prompt, stream: false, format,
+        options: { temperature: format === 'json' ? 0.2 : 0.7, top_p: 0.9 } })
     });
-    if (!res.ok) { console.error('[Ollama] Bad response:', res.status); return ''; }
+    if (!res.ok) return '';
     const data = await res.json();
-    console.log('[Ollama] Response received.');
     return (data.response || data.message?.content || '').trim();
-  } catch (err) {
-    if ((err as Error).name === 'AbortError') console.error('[Ollama] Request aborted');
-    else console.error('[Ollama] Fetch error:', err);
-    return '';
-  } finally {
-    clearTimeout(timeout);
-  }
+  } catch { return ''; }
 }
 
-/* ---------------------------- Evidence builder ---------------------------- */
-
+/* ---------- Evidence builder (unchanged) ---------- */
 export function buildProfileEvidence(profile: Partial<LovedOne> & { memorySnippets?: string[] }): string[] {
   const evidence: string[] = [];
   if (profile.name) evidence.push(`Identity: ${profile.name}.`);
@@ -67,210 +46,162 @@ export function buildProfileEvidence(profile: Partial<LovedOne> & { memorySnippe
   if (profile.summary) evidence.push(`Summary: ${profile.summary}`);
   if (profile.phrases?.length) evidence.push(`Known phrases: ${profile.phrases.join('; ')}`);
   if (profile.beliefs?.length) evidence.push(`Values: ${profile.beliefs.join('; ')}`);
-  if (profile.memorySnippets?.length) profile.memorySnippets.forEach((memory, index) => evidence.push(`Memory ${index + 1}: ${memory}`));
-  profile.artifacts?.forEach((artifact, index) => {
-    const label = `${artifact.type.toUpperCase()} ${index + 1} (${artifact.name})`;
-    if (artifact.userContext) evidence.push(`${label} user context: ${artifact.userContext}`);
-    if (artifact.extractedText) evidence.push(`${label} extracted text: ${artifact.extractedText}`);
-    if (artifact.transcript) evidence.push(`${label} transcript: ${artifact.transcript}`);
-    if (artifact.analysis) evidence.push(`${label} visual analysis: ${artifact.analysis}`);
+  if (profile.memorySnippets?.length) profile.memorySnippets.forEach((m,i) => evidence.push(`Memory ${i+1}: ${m}`));
+  profile.artifacts?.forEach((a,i) => {
+    const label = `${a.type.toUpperCase()} ${i+1} (${a.name})`;
+    if (a.userContext) evidence.push(`${label} context: ${a.userContext}`);
+    if (a.extractedText) evidence.push(`${label} text: ${a.extractedText}`);
+    if (a.transcript) evidence.push(`${label} transcript: ${a.transcript}`);
+    if (a.analysis) evidence.push(`${label} analysis: ${a.analysis}`);
   });
-  return evidence.map(item => item.replace(/\s+/g, ' ').trim().slice(0, 1400)).filter(Boolean).slice(0, 40);
+  return evidence.map(e => e.replace(/\s+/g,' ').trim().slice(0,1400)).filter(Boolean).slice(0,40);
 }
 
-/* ------------------------- Persona generation ----------------------------- */
-
+/* ---------- Persona generation (unchanged) ---------- */
 export interface PersonaGenerationInput {
-  lovedOneName: string;
-  textDocuments?: string[];
-  imageDataUris?: string[];
-  videoDataUris?: string[];
-  audioDataUris?: string[];
-  artifacts?: PersonaArtifact[];
+  lovedOneName: string; textDocuments?: string[]; imageDataUris?: string[];
+  videoDataUris?: string[]; audioDataUris?: string[]; artifacts?: PersonaArtifact[];
 }
-
 export interface PersonaGenerationOutput {
-  personalityTraits: string[];
-  keyBeliefs: string[];
+  personalityTraits: string[]; keyBeliefs: string[];
   speakingStyle: { tone: string; commonPhrases: string[]; cadenceDescription: string; };
-  overallSummary: string;
-  exampleDialogues: string[];
+  overallSummary: string; exampleDialogues: string[];
 }
-
-export async function generatePersona(input: PersonaGenerationInput): Promise<PersonaGenerationOutput> {
+export async function speakPersona(input: PersonaGenerationInput): Promise<PersonaGenerationOutput> {
   const artifactDescriptions: string[] = [];
   for (const a of input.artifacts || []) {
-    if (a.userContext) artifactDescriptions.push(`[Context for ${a.name}] ${a.userContext.slice(0, 1500)}`);
-    if (a.extractedText) artifactDescriptions.push(`[Text from ${a.name}] ${a.extractedText.slice(0, 8000)}`);
-    if (a.transcript) artifactDescriptions.push(`[Transcript ${a.name}] ${a.transcript.slice(0, 4000)}`);
-    if (a.analysis) artifactDescriptions.push(`[Analysis ${a.name}] ${a.analysis.slice(0, 2000)}`);
+    if (a.userContext) artifactDescriptions.push(`[Context] ${a.userContext.slice(0,1500)}`);
+    if (a.extractedText) artifactDescriptions.push(`[Text] ${a.extractedText.slice(0,8000)}`);
+    if (a.transcript) artifactDescriptions.push(`[Transcript] ${a.transcript.slice(0,4000)}`);
+    if (a.analysis) artifactDescriptions.push(`[Analysis] ${a.analysis.slice(0,2000)}`);
   }
   const textMaterial = (input.textDocuments || []).join('\n\n');
-  const prompt = `You are an empathetic archivist creating a persona for a memorial app. The person is: ${input.lovedOneName}.
-Below are all the materials provided by their family. Extract every detail possible and build a rich, grounded persona.
-Family’s written notes:
-${textMaterial || '(none)'}
-Artifacts and extracted content:
-${artifactDescriptions.length ? artifactDescriptions.join('\n\n') : '(none)'}
-Rules:
-- Use only information that appears in the evidence. Do not invent facts.
-- Highlight contradictions or uncertainty.
-- The persona should feel warm, real, and conversational.
-Return only JSON with this exact structure:
-{
-  "personalityTraits": ["list of 4-7 specific traits"],
-  "keyBeliefs": ["list of 3-5 core beliefs"],
-  "speakingStyle": { "tone": "brief description of their tone", "commonPhrases": ["phrases they often said"], "cadenceDescription": "rhythm, pace, pauses, accent hints" },
-  "overallSummary": "2-4 sentences summarizing their life and character",
-  "exampleDialogues": ["3-4 realistic first-person sentences"]
-}`;
+  const prompt = `You are an empathetic archivist creating a persona for a memorial app. The person: ${input.lovedOneName}.
+Evidence: ${textMaterial || '(none)'}
+Artifacts: ${artifactDescriptions.length ? artifactDescriptions.join('\n\n') : '(none)'}
+Return JSON: { "personalityTraits": [...], "keyBeliefs": [...], "speakingStyle": { "tone": "", "commonPhrases": [], "cadenceDescription": "" }, "overallSummary": "", "exampleDialogues": [...] }`;
   const raw = await ollamaChat(prompt, 'json');
   if (raw) {
     try {
-      const jsonStr = raw.match(/\{[\s\S]*\}/)?.[0] || raw;
-      const parsed = JSON.parse(jsonStr);
+      const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
       return {
-        personalityTraits: parsed.personalityTraits?.length ? parsed.personalityTraits : ['Warm', 'Loving'],
+        personalityTraits: parsed.personalityTraits?.length ? parsed.personalityTraits : ['Warm','Loving'],
         keyBeliefs: parsed.keyBeliefs?.length ? parsed.keyBeliefs : ['Family first'],
-        speakingStyle: {
-          tone: parsed.speakingStyle?.tone || 'Gentle and warm',
-          commonPhrases: parsed.speakingStyle?.commonPhrases || [],
-          cadenceDescription: parsed.speakingStyle?.cadenceDescription || 'Natural, conversational pace',
-        },
-        overallSummary: parsed.overallSummary || `${input.lovedOneName} is remembered with love.`,
+        speakingStyle: { tone: parsed.speakingStyle?.tone || 'Gentle', commonPhrases: parsed.speakingStyle?.commonPhrases || [], cadenceDescription: parsed.speakingStyle?.cadenceDescription || 'Natural' },
+        overallSummary: parsed.overallSummary || 'Remembered with love.',
         exampleDialogues: parsed.exampleDialogues?.length ? parsed.exampleDialogues : ['I am here with you.'],
       };
     } catch {}
   }
   return {
-    personalityTraits: ['Caring', 'Family-oriented'],
-    keyBeliefs: ['Family mattered deeply.'],
-    speakingStyle: { tone: 'Warm and familiar', commonPhrases: [], cadenceDescription: 'Gentle, unhurried' },
-    overallSummary: `${input.lovedOneName} is remembered through shared stories.`,
-    exampleDialogues: ['Tell me what you remember.', "I'm glad you're here."],
+    personalityTraits: ['Caring'], keyBeliefs: ['Family mattered.'],
+    speakingStyle: { tone: 'Warm', commonPhrases: [], cadenceDescription: 'Gentle' },
+    overallSummary: 'Remembered through stories.',
+    exampleDialogues: ['Tell me what you remember.'],
   };
 }
 
-/* -------------------------- Persona conversation -------------------------- */
-
+/* ---------- Persona conversation (unchanged) ---------- */
 export interface ConversationInput {
   personaId: string;
-  personaContext: {
-    name: string;
-    summary: string;
-    traits: string[];
-    phrases: string[];
-    sourceEvidence?: string[];
-    voiceProfile?: { hasReferenceAudio: boolean; accent: string; styleNotes: string; };
-    voiceSampleDataUri?: string;   // speaker_id
-  };
-  userInputText: string;
-  conversationHistory: { role: 'user' | 'model'; content: string }[];
+  personaContext: { name: string; summary: string; traits: string[]; phrases: string[]; sourceEvidence?: string[]; voiceProfile?: any; voiceSampleDataUri?: string; };
+  userInputText: string; conversationHistory: { role: 'user'|'model'; content: string }[];
 }
-
 export async function converseWithPersona(input: ConversationInput): Promise<{ responseText: string }> {
-  const evidence = (input.personaContext.sourceEvidence || [])
-    .map((e, i) => `[${i+1}] ${e}`)
-    .join('\n');
-  const historyStr = input.conversationHistory
-    .slice(-6)
-    .map(entry => `${entry.role === 'user' ? 'User' : input.personaContext.name}: ${entry.content}`)
-    .join('\n');
-  const prompt = `You are the Echo of ${input.personaContext.name}. Speak in first person, warmly and naturally, as if you are their living memory.
-Persona:
-- Summary: ${input.personaContext.summary}
-- Traits: ${input.personaContext.traits.join(', ')}
-- Common phrases: ${input.personaContext.phrases.join(', ') || 'none recorded'}
-- Speaking style: ${input.personaContext.voiceProfile?.styleNotes || 'warm and gentle, conversational pace'}
-Evidence you must rely on (do not invent facts outside of it):
-${evidence || 'No detailed evidence – ask for more memories.'}
-Conversation so far:
-${historyStr || '(new conversation)'}
+  const evidence = (input.personaContext.sourceEvidence || []).map((e,i) => `[${i+1}] ${e}`).join('\n');
+  const history = input.conversationHistory.slice(-6).map(e => `${e.role==='user'?'User':input.personaContext.name}: ${e.content}`).join('\n');
+  const prompt = `You are the Echo of ${input.personaContext.name}. Speak in first person.
+Persona: ${input.personaContext.summary} Traits: ${input.personaContext.traits.join(', ')} Phrases: ${input.personaContext.phrases.join(', ') || 'none'}
+Evidence: ${evidence || 'No detailed evidence – ask for more memories.'}
+Conversation: ${history || '(new)'}
 User says: "${input.userInputText}"
-Respond as ${input.personaContext.name} with one or two short, natural sentences. Use contractions and a heartfelt tone. If you don't know something, say you don't recall that detail and ask a gentle question.`;
-  const ollamaRes = await ollamaChat(prompt);
-  return { responseText: ollamaRes || "I'm here, listening." };
+Respond with 1-2 short, warm sentences. If you don't know, say you don't recall and ask a gentle question.`;
+  const res = await ollamaChat(prompt);
+  return { responseText: res || "I'm here, listening." };
 }
 
-/* ------------------------- Enhanced TTS (with cloning) --------------------- */
+/* ---------- Voicebox TTS integration (via bridge) ---------- */
+const BRIDGE_BASE = 'http://localhost:3001'; // Our bridge server
 
 let audioCtx: AudioContext | null = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
 
-function ensureAudioContext() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-  }
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
+export async function cloneVoice(file: File, profileName?: string): Promise<string | null> {
+  const fd = new FormData();
+  fd.append('file', file);
+  if (profileName) fd.append('profileName', profileName);
+  try {
+    const res = await fetch(`${BRIDGE_BASE}/upload-voice`, { method: 'POST', body: fd });
+    if (!res.ok) throw new Error(await res.text().catch(() => 'Bridge upload failed'));
+    const data = await res.json();
+    return data.speaker_id || data.profileId || null;
+  } catch (e) {
+    console.error('cloneVoice failed:', e);
+    return null;
   }
 }
 
-// Try to get cloned voice audio from local TTS server and play via AudioContext
-async function fetchAndPlayClone(text: string, speakerId: string, onStart: (() => void) | undefined, onEnd: (() => void) | undefined): Promise<boolean> {
+export async function deleteVoiceboxProfile(profileId: string): Promise<boolean> {
   try {
-    const res = await fetch('http://localhost:5001/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, speaker_id: speakerId, language: 'en' })
+    const res = await fetch(`${BRIDGE_BASE}/voice-profile/${encodeURIComponent(profileId)}`, {
+      method: 'DELETE',
     });
-    if (!res.ok) return false;
-    const arrayBuffer = await res.arrayBuffer();
-    ensureAudioContext();
-    if (!audioCtx) return false;
-
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    const source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioCtx.destination);
-
-    source.onended = () => onEnd?.();
-    source.start();
-    onStart?.();
+    if (!res.ok) throw new Error(await res.text().catch(() => 'Bridge delete failed'));
     return true;
-  } catch (err) {
-    console.warn('[TTS] Cloned playback error:', err);
+  } catch (e) {
+    console.error('deleteVoiceboxProfile failed:', e);
     return false;
   }
 }
 
-// Browser fallback TTS
-function speakWithBrowserFallback(text: string, onStart?: () => void, onEnd?: () => void) {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+async function playVoiceboxTTS(text: string, voiceboxProfileId: string, onStart?:()=>void, onEnd?:()=>void): Promise<boolean> {
+  try {
+    const res = await fetch(`${BRIDGE_BASE}/speak`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice: voiceboxProfileId }),
+    });
+    if (!res.ok) {
+      console.error('Bridge /speak failed', res.status);
+      return false;
+    }
+    const arrayBuffer = await res.arrayBuffer();
+    ensureAudio(); if (!audioCtx) return false;
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    const source = audioCtx.createBufferSource(); source.buffer = audioBuffer; source.connect(audioCtx.destination);
+    source.onended = () => onEnd?.(); source.start(); onStart?.();
+    return true;
+  } catch (e) {
+    console.error('playVoiceboxTTS error:', e);
+    return false;
+  }
+}
+
+function speakBrowserFallback(text: string, onStart?:()=>void, onEnd?:()=>void) {
+  if (typeof window==='undefined' || !('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 0.9;
-  utterance.pitch = 1.0;
-  utterance.volume = 1;
+  const u = new SpeechSynthesisUtterance(text); u.rate=0.9; u.pitch=1; u.volume=1;
   const voices = window.speechSynthesis.getVoices();
-  const preferred = voices.find(v => v.lang.startsWith('en') && /Google US English|Samantha|Ava|Allison/i.test(v.name))
-    || voices.find(v => v.lang.startsWith('en'));
-  if (preferred) utterance.voice = preferred;
-  utterance.onstart = () => onStart?.();
-  utterance.onend = () => onEnd?.();
-  utterance.onerror = () => onEnd?.();
-  window.speechSynthesis.speak(utterance);
-  setTimeout(() => {
-    if (window.speechSynthesis.speaking) return;
-    onEnd?.();
-  }, 3000);
+  const pref = voices.find(v => v.lang.startsWith('en') && /Google US English|Samantha|Ava|Allison/i.test(v.name)) || voices.find(v => v.lang.startsWith('en'));
+  if (pref) u.voice = pref;
+  u.onstart = () => onStart?.(); u.onend = () => onEnd?.(); u.onerror = () => onEnd?.();
+  window.speechSynthesis.speak(u);
 }
 
-/** Start the audio context on a user gesture (call this from the mic button) */
-export function initAudioContext() {
-  ensureAudioContext();
-}
+export function initAudioContext() { ensureAudio(); }
 
-// The main TTS export – tries cloned server, then falls back to browser TTS
 export async function speakWithBrowserTTS(
   text: string,
   speakerId?: string,
-  options?: { onStart?: () => void; onEnd?: () => void }
+  opts?: { onStart?:()=>void; onEnd?:()=>void }
 ) {
   if (speakerId) {
-    console.log('[TTS] Trying cloned voice...');
-    const ok = await fetchAndPlayClone(text, speakerId, options?.onStart, options?.onEnd);
+    const ok = await playVoiceboxTTS(text, speakerId, opts?.onStart, opts?.onEnd);
     if (ok) return;
-    console.warn('[TTS] Cloned voice server unreachable, using browser TTS.');
+    throw new Error('[Voicebox] TTS failed for cloned voice profile');
   }
-  speakWithBrowserFallback(text, options?.onStart, options?.onEnd);
+  speakBrowserFallback(text, opts?.onStart, opts?.onEnd);
 }

@@ -9,7 +9,7 @@ import { Mic, X, MoreVertical, Volume2, Info } from "lucide-react";
 import Image from 'next/image';
 import { VoiceVisualizer } from '@/components/voice-visualizer';
 import { useToast } from "@/hooks/use-toast";
-import { converseWithPersona, speakWithBrowserTTS, unlockClonedVoiceAudio } from '@/lib/local-ai';
+import { converseWithPersona, speakWithBrowserTTS, initAudioContext } from '@/lib/local-ai';
 import { getProfileById } from '@/lib/storage';
 
 export default function EchoConversation() {
@@ -45,7 +45,7 @@ export default function EchoConversation() {
   if (!person) return <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground">Loading Echo...</div>;
 
   const handleMicClick = async () => {
-    unlockClonedVoiceAudio();
+    initAudioContext();
     if (isListening) {
       setIsListening(false);
       // Mock finishing the sentence for the demo
@@ -81,7 +81,6 @@ export default function EchoConversation() {
             setIsPlaying(false);
             setLastResponse(null);
           },
-          expectClonedVoice: Boolean(person.voiceProfile?.hasReferenceAudio),
         });
       } catch (error) {
         toast({
