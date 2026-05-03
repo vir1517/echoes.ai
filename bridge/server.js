@@ -16,6 +16,27 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+async function warmOllama() {
+  try {
+    await fetch(`${OLLAMA_API}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama3.2:1b',
+        prompt: '',
+        stream: false,
+        keep_alive: -1
+      })
+    });
+  } catch {}
+}
+
+async function warmVoicebox() {
+  try {
+    await fetch(`${VOICEBOX_API}/health`);
+  } catch {}
+}
+
 async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -49,6 +70,11 @@ app.get('/health', async (_, res) => {
   }
 });
 
+app.post('/warmup', async (_, res) => {
+  await Promise.allSettled([warmOllama(), warmVoicebox()]);
+  res.json({ ok: true });
+});
+
 // ── Ollama proxy ─────────────────────────────────────────
 app.get('/api/tags', async (_, res) => {
   try {
@@ -65,7 +91,10 @@ app.post('/api/speak', async (req, res) => {
     const r = await fetch(`${OLLAMA_API}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify({
+        keep_alive: -1,
+        ...req.body,
+      })
     });
     if (!r.ok) {
       const err = await r.text();
@@ -81,9 +110,10 @@ app.post('/api/speak', async (req, res) => {
 app.post('/upload-voice', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file' });
-    if (path.extname(req.file.originalname).toLowerCase() !== '.mp3') {
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (!['.mp3', '.wav'].includes(ext)) {
       fs.unlink(req.file.path, () => {});
-      return res.status(400).json({ error: 'Only .mp3 voice samples are supported right now' });
+      return res.status(400).json({ error: 'Only .mp3 voice samples or trimmed .wav uploads are supported right now' });
     }
 
     const requestedName = (req.body.profileName || path.parse(req.file.originalname).name || 'cloned_voice')
@@ -209,4 +239,7 @@ app.post('/speak', async (req, res) => {
   }
 });
 
-app.listen(3001, () => console.log('Bridge running on http://localhost:3001'));
+app.listen(3001, async () => {
+  console.log('Bridge running on http://localhost:3001');
+  await Promise.allSettled([warmOllama(), warmVoicebox()]);
+});

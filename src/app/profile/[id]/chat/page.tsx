@@ -9,7 +9,7 @@ import { Mic, X, MoreVertical, Volume2, Info } from "lucide-react";
 import Image from 'next/image';
 import { VoiceVisualizer } from '@/components/voice-visualizer';
 import { useToast } from "@/hooks/use-toast";
-import { converseWithPersona, speakWithBrowserTTS, initAudioContext } from '@/lib/local-ai';
+import { converseWithPersona, speakWithBrowserTTS, initAudioContext, warmVoiceAndLanguageModels, buildKnowledgeChunks, buildProfileEvidence } from '@/lib/local-ai';
 import { getProfileById } from '@/lib/storage';
 
 export default function EchoConversation() {
@@ -27,10 +27,23 @@ export default function EchoConversation() {
   useEffect(() => {
     async function loadProfile() {
       const profile = await getProfileById(id as string);
+      if (profile && !profile.knowledgeChunks?.length) {
+        profile.knowledgeChunks = buildKnowledgeChunks({
+          ...profile,
+          memorySnippets: (profile as any).memorySnippets || [],
+        });
+      }
+      if (profile && !profile.sourceEvidence) {
+        profile.sourceEvidence = buildProfileEvidence(profile as any);
+      }
       setPerson(profile as LovedOne | null);
     }
     loadProfile();
   }, [id]);
+
+  useEffect(() => {
+    warmVoiceAndLanguageModels();
+  }, []);
 
   useEffect(() => {
     // Initial greeting simulation
@@ -63,6 +76,7 @@ export default function EchoConversation() {
             sourceEvidence: person.sourceEvidence || [],
             voiceProfile: person.voiceProfile,
             voiceSampleDataUri: person.voiceSampleDataUri,
+            knowledgeChunks: person.knowledgeChunks || [],
           },
           userInputText: mockUserInput,
           conversationHistory: chatHistory

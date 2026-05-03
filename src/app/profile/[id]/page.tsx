@@ -10,8 +10,7 @@ import { EchoOrb } from '@/components/echo-orb';
 import { useToast } from "@/hooks/use-toast";
 import { cn } from '@/lib/utils';
 import { getProfileById, deleteProfile } from '@/lib/storage';
-import { converseWithPersona, deleteVoiceboxProfile, speakWithBrowserTTS, initAudioContext } from '@/lib/local-ai';
-import { buildProfileEvidence } from '@/lib/local-ai';
+import { converseWithPersona, deleteVoiceboxProfile, speakWithBrowserTTS, initAudioContext, buildKnowledgeChunks, buildProfileEvidence, warmVoiceAndLanguageModels } from '@/lib/local-ai';
 import type { LovedOne } from '@/lib/mock-data';
 
 export default function ProfileDetail() {
@@ -31,6 +30,12 @@ export default function ProfileDetail() {
     (async () => {
       const found = await getProfileById(id as string);
       if (found) {
+        if (!found.knowledgeChunks?.length) {
+          found.knowledgeChunks = buildKnowledgeChunks({
+            ...found,
+            memorySnippets: (found as any).memorySnippets || [],
+          });
+        }
         if (!found.sourceEvidence) found.sourceEvidence = buildProfileEvidence(found as any);
         setPerson(found);
       } else {
@@ -39,6 +44,10 @@ export default function ProfileDetail() {
       }
     })();
   }, [id, router, toast]);
+
+  useEffect(() => {
+    warmVoiceAndLanguageModels();
+  }, []);
 
   const handleAIResponse = useCallback(async (text: string) => {
     if (!person) return;
@@ -54,6 +63,7 @@ export default function ProfileDetail() {
           sourceEvidence: person.sourceEvidence || [],
           voiceProfile: person.voiceProfile,
           voiceSampleDataUri: person.voiceSampleDataUri,
+          knowledgeChunks: person.knowledgeChunks || [],
         },
         userInputText: text,
         conversationHistory: chatHistory,

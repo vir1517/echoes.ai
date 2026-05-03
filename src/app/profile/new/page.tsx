@@ -15,8 +15,17 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { PersonaArtifact } from '@/lib/mock-data';
-import { speakPersona, cloneVoice } from '@/lib/local-ai';
+import { buildKnowledgeChunks, cloneVoice, enrichArtifacts, speakPersona } from '@/lib/local-ai';
 import { saveProfile, getProfileById } from '@/lib/storage';
+
+type UploadKind = 'image' | 'video' | 'audio' | 'text';
+
+const FILE_RULES: Record<UploadKind, { accept: string; label: string }> = {
+  image: { accept: '.png,.jpg,.jpeg,image/png,image/jpeg', label: 'Photos' },
+  video: { accept: '.mp4,.mov,.m4v,.webm,.avi,video/mp4,video/quicktime,video/webm,video/x-msvideo', label: 'Videos' },
+  audio: { accept: '.mp3,audio/mpeg', label: 'Voice' },
+  text: { accept: '.pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain', label: 'Docs' },
+};
 
 function CreateProfileForm() {
   const router = useRouter();
@@ -41,6 +50,7 @@ function CreateProfileForm() {
   const [artifacts, setArtifacts] = useState<PersonaArtifact[]>([]);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [speakerId, setSpeakerId] = useState<string | null>(null); // Voicebox profile id
+  const [uploadKind, setUploadKind] = useState<UploadKind>('image');
 
   useEffect(() => {
     if (!editId) return;
@@ -98,6 +108,69 @@ function CreateProfileForm() {
     reader.readAsDataURL(file);
   });
 
+  const audioBufferToWavBlob = (buffer: AudioBuffer): Blob => {
+    const channelCount = Math.min(1, buffer.numberOfChannels);
+    const sampleRate = buffer.sampleRate;
+    const samples = buffer.length;
+    const bytesPerSample = 2;
+    const blockAlign = channelCount * bytesPerSample;
+    const dataSize = samples * blockAlign;
+    const out = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(out);
+
+    const writeString = (offset: number, value: string) => {
+      for (let index = 0; index < value.length; index++) {
+        view.setUint8(offset + index, value.charCodeAt(index));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, channelCount, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    const channelData = buffer.getChannelData(0);
+    let offset = 44;
+    for (let index = 0; index < samples; index++) {
+      const sample = Math.max(-1, Math.min(1, channelData[index]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += 2;
+    }
+
+    return new Blob([out], { type: 'audio/wav' });
+  };
+
+  const trimVoiceSampleIfNeeded = async (audioFile: File): Promise<File> => {
+    const audioContext = new AudioContext();
+    try {
+      const arrayBuffer = await audioFile.arrayBuffer();
+      const decoded = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+      if (decoded.duration <= 29.5) return audioFile;
+
+      const maxFrames = Math.floor(decoded.sampleRate * 29.5);
+      const clipped = audioContext.createBuffer(1, maxFrames, decoded.sampleRate);
+      clipped.copyToChannel(decoded.getChannelData(0).slice(0, maxFrames), 0);
+      const wavBlob = audioBufferToWavBlob(clipped);
+      const trimmedName = audioFile.name.replace(/\.mp3$/i, '') + '-trimmed.wav';
+      toast({
+        title: "Voice Sample Trimmed",
+        description: "The first 29 seconds were used because Voicebox only accepts up to 30 seconds.",
+      });
+      return new File([wavBlob], trimmedName, { type: 'audio/wav' });
+    } finally {
+      await audioContext.close();
+    }
+  };
+
   const extractTextFromFile = async (file: File): Promise<string> => {
     const ext = file.name.split('.').pop()?.toLowerCase();
     if (file.type.startsWith('text/') || ['txt','md','csv','json'].includes(ext || '')) return file.text();
@@ -131,7 +204,8 @@ function CreateProfileForm() {
       }
 
       setUploadStatus(`Creating Voicebox voice for ${formData.name || 'this profile'}...`);
-      const voiceboxProfileId = await cloneVoice(audioFile, formData.name || audioFile.name);
+      const preparedFile = await trimVoiceSampleIfNeeded(audioFile);
+      const voiceboxProfileId = await cloneVoice(preparedFile, formData.name || audioFile.name);
       if (!voiceboxProfileId) {
         toast({ title: "Voice Clone Failed", description: "Could not create the Voicebox profile. Make sure the bridge and Voicebox are running.", variant: "destructive" });
         return null;
@@ -145,15 +219,38 @@ function CreateProfileForm() {
     }
   };
 
+  const openUploader = (kind: UploadKind) => {
+    setUploadKind(kind);
+    fileInputRef.current?.click();
+  };
+
+  const detectArtifactType = (file: File, kind: UploadKind): PersonaArtifact['type'] | null => {
+    if (kind === 'image') {
+      return /(\.png|\.jpe?g)$/i.test(file.name) || ['image/png', 'image/jpeg'].includes(file.type) ? 'image' : null;
+    }
+    if (kind === 'video') {
+      return /(\.mp4|\.mov|\.m4v|\.webm|\.avi)$/i.test(file.name) ? 'video' : null;
+    }
+    if (kind === 'audio') {
+      return /(\.mp3)$/i.test(file.name) || file.type === 'audio/mpeg' ? 'audio' : null;
+    }
+    return /(\.pdf|\.docx|\.txt)$/i.test(file.name) ? 'text' : null;
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
     for (const file of Array.from(files)) {
       setUploadStatus(`Processing ${file.name}...`);
-      let type: 'image' | 'video' | 'audio' | 'text' = 'text';
-      if (file.type.startsWith('image/')) type = 'image';
-      else if (file.type.startsWith('video/')) type = 'video';
-      else if (file.type.startsWith('audio/')) type = 'audio';
+      const type = detectArtifactType(file, uploadKind);
+      if (!type) {
+        toast({
+          title: "Wrong File Type",
+          description: `${FILE_RULES[uploadKind].label} only accepts ${FILE_RULES[uploadKind].accept}.`,
+          variant: "destructive",
+        });
+        continue;
+      }
 
       try {
         const dataUri = type === 'audio'
@@ -213,21 +310,42 @@ function CreateProfileForm() {
     setIsProcessing(true);
     setProcessingStatus("Generating their Echo with local AI (Ollama)…");
     try {
+      setProcessingStatus("Analyzing uploaded memories and artifacts…");
+      const enrichedArtifacts = await enrichArtifacts(artifacts);
       const textDocs = [
         `Name: ${formData.name}`,
         `Relation: ${formData.relation}`,
+        `Birth year: ${formData.birthYear}`,
+        `Passing year: ${formData.passingYear}`,
         `Personality: ${formData.personality}`,
         `Phrases: ${formData.phrases}`,
         `Birthplace: ${formData.birthPlace}`,
         ...memories.map(m => `Memory: ${m.content}`)
       ];
 
-      const imageUris = artifacts.filter(a => a.type === 'image').map(a => a.dataUri);
+      setArtifacts(enrichedArtifacts);
+      setProcessingStatus("Building a grounded knowledge base…");
+      const imageUris = enrichedArtifacts.filter(a => a.type === 'image').map(a => a.dataUri);
       const personaData = await speakPersona({
         lovedOneName: formData.name,
         textDocuments: textDocs,
-        artifacts,
+        artifacts: enrichedArtifacts,
         imageDataUris: imageUris.length ? imageUris : undefined,
+      });
+
+      const knowledgeChunks = buildKnowledgeChunks({
+        name: formData.name,
+        relation: formData.relation,
+        birthYear: parseInt(formData.birthYear) || 0,
+        passingYear: parseInt(formData.passingYear) || 0,
+        birthPlace: formData.birthPlace || 'Unknown',
+        summary: personaData.overallSummary,
+        phrases: personaData.speakingStyle.commonPhrases.length
+          ? personaData.speakingStyle.commonPhrases
+          : formData.phrases.split(',').map(s => s.trim()).filter(Boolean),
+        beliefs: personaData.keyBeliefs,
+        artifacts: enrichedArtifacts,
+        memorySnippets: memories.map(m => m.content),
       });
 
       const newProfile = {
@@ -249,15 +367,16 @@ function CreateProfileForm() {
         events: [],
         exampleDialogues: personaData.exampleDialogues,
         memorySnippets: memories.map(m => m.content),
-        artifacts,
+        artifacts: enrichedArtifacts,
         voiceSampleDataUri: speakerId || undefined,
-        voiceSampleName: artifacts.find(a => a.type === 'audio')?.name,
+        voiceSampleName: enrichedArtifacts.find(a => a.type === 'audio')?.name,
         voiceProfile: {
           hasReferenceAudio: !!speakerId,
           accent: 'US English',
           styleNotes: personaData.speakingStyle.cadenceDescription,
         },
-        sourceEvidence: [],
+        sourceEvidence: knowledgeChunks.map(chunk => `${chunk.sourceName}: ${chunk.text}`),
+        knowledgeChunks,
       };
 
       const success = await saveProfile(newProfile);
@@ -294,8 +413,14 @@ function CreateProfileForm() {
         </div>
         <div className="w-12" />
       </header>
-      <input type="file" ref={fileInputRef} className="hidden" multiple onChange={handleFileUpload}
-        accept="image/*,video/*,audio/*,.pdf,.txt,.doc,.docx" />
+      <input
+        type="file"
+        ref={fileInputRef}
+        className="hidden"
+        multiple
+        onChange={handleFileUpload}
+        accept={FILE_RULES[uploadKind].accept}
+      />
 
       <main className="flex-1 max-w-4xl mx-auto w-full px-10 py-20 space-y-12">
         <div className="flex items-center justify-between relative px-6">
@@ -398,8 +523,13 @@ function CreateProfileForm() {
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                  {[{icon: ImageIcon, label: 'Photos'}, {icon: Video, label: 'Videos'}, {icon: Mic, label: 'Voice'}, {icon: FileText, label: 'Docs'}].map(({icon: Ic, label}) => (
-                    <button key={label} onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group">
+                  {([
+                    {icon: ImageIcon, label: 'Photos', kind: 'image' as const},
+                    {icon: Video, label: 'Videos', kind: 'video' as const},
+                    {icon: Mic, label: 'Voice', kind: 'audio' as const},
+                    {icon: FileText, label: 'Docs', kind: 'text' as const},
+                  ]).map(({icon: Ic, label, kind}) => (
+                    <button key={label} onClick={() => openUploader(kind)} className="flex flex-col items-center justify-center p-10 rounded-[2.5rem] bg-primary/10 border border-white/5 hover:bg-primary/20 transition-all gap-5 group">
                       <Ic className="w-10 h-10 text-accent group-hover:scale-110 transition-transform" />
                       <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-60">{label}</span>
                     </button>

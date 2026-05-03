@@ -1,132 +1,468 @@
 'use client';
 
-import type { LovedOne, PersonaArtifact } from '@/lib/mock-data';
+import type { KnowledgeChunk, LovedOne, PersonaArtifact } from '@/lib/mock-data';
 
-/* ---------- Ollama helpers (unchanged) ---------- */
-async function chooseOllamaModel(): Promise<string | null> {
+const BRIDGE_BASE = 'http://localhost:3001';
+const OLLAMA_BASE = 'http://localhost:11434/api';
+const STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'had', 'has', 'he', 'her',
+  'his', 'i', 'in', 'is', 'it', 'its', 'me', 'my', 'of', 'on', 'or', 'our', 'she', 'that',
+  'the', 'their', 'them', 'they', 'this', 'to', 'was', 'we', 'were', 'with', 'you', 'your'
+]);
+
+let audioCtx: AudioContext | null = null;
+let cachedFastModel: string | null = null;
+let cachedVisionModel: string | null = null;
+
+function tokenize(text: string): string[] {
+  return (text.toLowerCase().match(/[a-z0-9']+/g) || []).filter(token => token.length > 1 && !STOP_WORDS.has(token));
+}
+
+function chunkText(text: string, limit = 500): string[] {
+  const cleaned = text.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return [];
+  if (cleaned.length <= limit) return [cleaned];
+
+  const sentences = cleaned.split(/(?<=[.!?])\s+/);
+  const chunks: string[] = [];
+  let current = '';
+
+  for (const sentence of sentences) {
+    if (!sentence) continue;
+    const next = current ? `${current} ${sentence}` : sentence;
+    if (next.length <= limit) {
+      current = next;
+      continue;
+    }
+    if (current) chunks.push(current);
+    current = sentence;
+    while (current.length > limit) {
+      chunks.push(current.slice(0, limit));
+      current = current.slice(limit).trim();
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function extractKeywords(text: string): string[] {
+  const counts = new Map<string, number>();
+  for (const token of tokenize(text)) {
+    counts.set(token, (counts.get(token) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([token]) => token);
+}
+
+async function listOllamaModels(): Promise<string[]> {
   try {
-    const res = await fetch('http://localhost:3001/api/tags');
-    if (!res.ok) return null;
+    const res = await fetch(`${OLLAMA_BASE}/tags`);
+    if (!res.ok) return [];
     const data = await res.json();
-    const models: string[] = (data.models || []).map((m: any) => m.name);
-    console.log('[Ollama] Available models:', models);
-    const order = ['llama3.2', 'qwen2.5', 'mistral', 'gemma2', 'phi3'];
-    return order.find(m => models.some(n => n.startsWith(m))) || models[0] || null;
+    return (data.models || []).map((model: any) => model.name as string);
   } catch {
-    return null;
+    return [];
   }
 }
 
-async function ollamaChat(prompt: string, format?: 'json'): Promise<string> {
-  const model = await chooseOllamaModel();
-  if (!model) { console.warn('[Ollama] No model found'); return ''; }
+async function chooseFastOllamaModel(): Promise<string | null> {
+  if (cachedFastModel) return cachedFastModel;
+  const models = await listOllamaModels();
+  const order = ['llama3.2:1b', 'llama3.2', 'qwen2.5:1.5b', 'phi3', 'gemma2:2b'];
+  cachedFastModel = order.find(target => models.some(model => model.startsWith(target))) || models[0] || null;
+  return cachedFastModel;
+}
+
+async function chooseVisionModel(): Promise<string | null> {
+  if (cachedVisionModel) return cachedVisionModel;
+  const models = await listOllamaModels();
+  const order = ['gemma3', 'llava', 'qwen2.5vl', 'minicpm-v', 'moondream'];
+  cachedVisionModel = order.find(target => models.some(model => model.startsWith(target))) || null;
+  return cachedVisionModel;
+}
+
+async function ollamaGenerate(prompt: string, options?: {
+  format?: 'json';
+  model?: string | null;
+  images?: string[];
+  temperature?: number;
+  numPredict?: number;
+}) {
+  const model = options?.model ?? await chooseFastOllamaModel();
+  if (!model) return '';
+
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), 12000);
+
   try {
-    const res = await fetch('http://localhost:3001/api/speak', {
+    const res = await fetch(`${BRIDGE_BASE}/api/speak`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      body: JSON.stringify({ model, prompt, stream: false, format,
-        options: { temperature: format === 'json' ? 0.2 : 0.7, top_p: 0.9 } })
+      body: JSON.stringify({
+        model,
+        prompt,
+        images: options?.images,
+        stream: false,
+        format: options?.format,
+        keep_alive: -1,
+        options: {
+          temperature: options?.temperature ?? (options?.format === 'json' ? 0.15 : 0.2),
+          top_p: 0.9,
+          num_predict: options?.numPredict ?? 160,
+        },
+      }),
     });
+
     if (!res.ok) return '';
     const data = await res.json();
     return (data.response || data.message?.content || '').trim();
-  } catch { return ''; }
-}
-
-/* ---------- Evidence builder (unchanged) ---------- */
-export function buildProfileEvidence(profile: Partial<LovedOne> & { memorySnippets?: string[] }): string[] {
-  const evidence: string[] = [];
-  if (profile.name) evidence.push(`Identity: ${profile.name}.`);
-  if (profile.relation) evidence.push(`Relationship: ${profile.relation}.`);
-  if (profile.birthYear || profile.passingYear) evidence.push(`Years: ${profile.birthYear || 'unknown'} to ${profile.passingYear || 'unknown'}.`);
-  if (profile.birthPlace) evidence.push(`Birthplace/context: ${profile.birthPlace}.`);
-  if (profile.summary) evidence.push(`Summary: ${profile.summary}`);
-  if (profile.phrases?.length) evidence.push(`Known phrases: ${profile.phrases.join('; ')}`);
-  if (profile.beliefs?.length) evidence.push(`Values: ${profile.beliefs.join('; ')}`);
-  if (profile.memorySnippets?.length) profile.memorySnippets.forEach((m,i) => evidence.push(`Memory ${i+1}: ${m}`));
-  profile.artifacts?.forEach((a,i) => {
-    const label = `${a.type.toUpperCase()} ${i+1} (${a.name})`;
-    if (a.userContext) evidence.push(`${label} context: ${a.userContext}`);
-    if (a.extractedText) evidence.push(`${label} text: ${a.extractedText}`);
-    if (a.transcript) evidence.push(`${label} transcript: ${a.transcript}`);
-    if (a.analysis) evidence.push(`${label} analysis: ${a.analysis}`);
-  });
-  return evidence.map(e => e.replace(/\s+/g,' ').trim().slice(0,1400)).filter(Boolean).slice(0,40);
-}
-
-/* ---------- Persona generation (unchanged) ---------- */
-export interface PersonaGenerationInput {
-  lovedOneName: string; textDocuments?: string[]; imageDataUris?: string[];
-  videoDataUris?: string[]; audioDataUris?: string[]; artifacts?: PersonaArtifact[];
-}
-export interface PersonaGenerationOutput {
-  personalityTraits: string[]; keyBeliefs: string[];
-  speakingStyle: { tone: string; commonPhrases: string[]; cadenceDescription: string; };
-  overallSummary: string; exampleDialogues: string[];
-}
-export async function speakPersona(input: PersonaGenerationInput): Promise<PersonaGenerationOutput> {
-  const artifactDescriptions: string[] = [];
-  for (const a of input.artifacts || []) {
-    if (a.userContext) artifactDescriptions.push(`[Context] ${a.userContext.slice(0,1500)}`);
-    if (a.extractedText) artifactDescriptions.push(`[Text] ${a.extractedText.slice(0,8000)}`);
-    if (a.transcript) artifactDescriptions.push(`[Transcript] ${a.transcript.slice(0,4000)}`);
-    if (a.analysis) artifactDescriptions.push(`[Analysis] ${a.analysis.slice(0,2000)}`);
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timeout);
   }
-  const textMaterial = (input.textDocuments || []).join('\n\n');
-  const prompt = `You are an empathetic archivist creating a persona for a memorial app. The person: ${input.lovedOneName}.
-Evidence: ${textMaterial || '(none)'}
-Artifacts: ${artifactDescriptions.length ? artifactDescriptions.join('\n\n') : '(none)'}
-Return JSON: { "personalityTraits": [...], "keyBeliefs": [...], "speakingStyle": { "tone": "", "commonPhrases": [], "cadenceDescription": "" }, "overallSummary": "", "exampleDialogues": [...] }`;
-  const raw = await ollamaChat(prompt, 'json');
+}
+
+async function analyzeImageArtifact(artifact: PersonaArtifact): Promise<string> {
+  const userContext = artifact.userContext?.trim();
+  const visionModel = await chooseVisionModel();
+  if (!artifact.dataUri) {
+    return userContext ? `Family context: ${userContext}` : '';
+  }
+  if (!visionModel) {
+    return userContext
+      ? `Family context: ${userContext}. Automated image vision is unavailable on this machine because no Ollama vision model is installed.`
+      : '';
+  }
+
+  const prompt = `Analyze this family photo for a memorial profile. Describe only observable details that could matter later:
+- people, age clues, clothing, setting, objects, text in image, activity, approximate era, mood
+- if uncertain, say uncertain
+- if family context is provided, combine it carefully without inventing facts
+Family context: ${userContext || '(none)'}
+Return 5-8 short factual lines.`;
+
+  const result = await ollamaGenerate(prompt, {
+    model: visionModel,
+    images: [artifact.dataUri.split(',')[1] || artifact.dataUri],
+    temperature: 0.1,
+    numPredict: 220,
+  });
+
+  return result || (userContext ? `Family context: ${userContext}` : '');
+}
+
+async function extractVideoFrames(dataUri: string, maxFrames = 3): Promise<string[]> {
+  return await new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.src = dataUri;
+    video.muted = true;
+    video.playsInline = true;
+    video.crossOrigin = 'anonymous';
+
+    const frames: string[] = [];
+
+    video.onloadedmetadata = async () => {
+      if (!Number.isFinite(video.duration) || video.duration <= 0) {
+        resolve([]);
+        return;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.min(video.videoWidth || 640, 640);
+      canvas.height = Math.min(video.videoHeight || 360, 360);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve([]);
+        return;
+      }
+
+      const points = Array.from({ length: maxFrames }, (_, index) => {
+        const ratio = (index + 1) / (maxFrames + 1);
+        return Math.max(0, Math.min(video.duration - 0.1, video.duration * ratio));
+      });
+
+      const seekTo = (time: number) => new Promise<void>((done) => {
+        const handler = () => {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          frames.push(canvas.toDataURL('image/jpeg', 0.72));
+          video.removeEventListener('seeked', handler);
+          done();
+        };
+        video.addEventListener('seeked', handler, { once: true });
+        video.currentTime = time;
+      });
+
+      for (const time of points) {
+        await seekTo(time);
+      }
+      resolve(frames);
+    };
+
+    video.onerror = () => resolve([]);
+  });
+}
+
+async function analyzeVideoArtifact(artifact: PersonaArtifact): Promise<string> {
+  const userContext = artifact.userContext?.trim();
+  if (!artifact.dataUri) return userContext ? `Family context: ${userContext}` : '';
+
+  const visionModel = await chooseVisionModel();
+  if (!visionModel) {
+    return userContext
+      ? `Family context: ${userContext}. Automated video vision is unavailable on this machine because no Ollama vision model is installed.`
+      : '';
+  }
+
+  const frames = await extractVideoFrames(artifact.dataUri);
+  if (!frames.length) return userContext ? `Family context: ${userContext}` : '';
+
+  const descriptions: string[] = [];
+  for (const [index, frame] of frames.entries()) {
+    const prompt = `Describe this frame from a family video. Focus on people, place, activity, visible text, objects, and emotional tone.
+Frame position: ${index + 1} of ${frames.length}
+Family context: ${userContext || '(none)'}`;
+    const result = await ollamaGenerate(prompt, {
+      model: visionModel,
+      images: [frame.split(',')[1] || frame],
+      temperature: 0.1,
+      numPredict: 140,
+    });
+    if (result) descriptions.push(`Frame ${index + 1}: ${result}`);
+  }
+
+  return descriptions.join('\n');
+}
+
+export async function enrichArtifacts(artifacts: PersonaArtifact[]): Promise<PersonaArtifact[]> {
+  const enriched: PersonaArtifact[] = [];
+  for (const artifact of artifacts) {
+    let next = { ...artifact };
+    if (artifact.type === 'image' && !artifact.analysis) {
+      next.analysis = await analyzeImageArtifact(artifact);
+    }
+    if (artifact.type === 'video' && !artifact.analysis) {
+      next.analysis = await analyzeVideoArtifact(artifact);
+    }
+    enriched.push(next);
+  }
+  return enriched;
+}
+
+function makeChunk(sourceType: KnowledgeChunk['sourceType'], sourceName: string, text: string, index: number): KnowledgeChunk {
+  return {
+    id: `${sourceType}-${sourceName}-${index}`.replace(/[^a-zA-Z0-9_-]/g, '-'),
+    text,
+    sourceType,
+    sourceName,
+    keywords: extractKeywords(text),
+  };
+}
+
+export function buildKnowledgeChunks(profile: Partial<LovedOne> & { memorySnippets?: string[] }): KnowledgeChunk[] {
+  const chunks: KnowledgeChunk[] = [];
+  const identityFacts = [
+    profile.name ? `Name: ${profile.name}` : '',
+    profile.relation ? `Relationship: ${profile.relation}` : '',
+    profile.birthYear ? `Birth year: ${profile.birthYear}` : '',
+    profile.passingYear ? `Passing year: ${profile.passingYear}` : '',
+    profile.birthPlace ? `Birthplace: ${profile.birthPlace}` : '',
+    profile.summary ? `Summary: ${profile.summary}` : '',
+    profile.phrases?.length ? `Common phrases: ${profile.phrases.join('; ')}` : '',
+    profile.beliefs?.length ? `Beliefs and values: ${profile.beliefs.join('; ')}` : '',
+  ].filter(Boolean).join('. ');
+
+  if (identityFacts) {
+    chunkText(identityFacts).forEach((text, index) => chunks.push(makeChunk('identity', profile.name || 'identity', text, index)));
+  }
+
+  (profile.memorySnippets || []).forEach((memory, index) => {
+    chunkText(memory).forEach((text, subIndex) => {
+      chunks.push(makeChunk('memory', `memory-${index + 1}`, text, subIndex));
+    });
+  });
+
+  (profile.artifacts || []).forEach((artifact, index) => {
+    const sourceType = artifact.type === 'text'
+      ? 'document'
+      : artifact.type === 'audio'
+        ? 'audio'
+        : artifact.type;
+
+    const fields = [
+      artifact.userContext ? `Family context: ${artifact.userContext}` : '',
+      artifact.extractedText ? `Extracted text: ${artifact.extractedText}` : '',
+      artifact.transcript ? `Transcript: ${artifact.transcript}` : '',
+      artifact.analysis ? `Analysis: ${artifact.analysis}` : '',
+    ].filter(Boolean).join('\n');
+
+    chunkText(fields, 650).forEach((text, subIndex) => {
+      chunks.push(makeChunk(sourceType, artifact.name || `artifact-${index + 1}`, text, subIndex));
+    });
+  });
+
+  return chunks;
+}
+
+function scoreChunk(chunk: KnowledgeChunk, queryTokens: string[]): number {
+  if (!queryTokens.length) return 0;
+  const haystack = `${chunk.text} ${chunk.keywords?.join(' ') || ''}`.toLowerCase();
+  let score = 0;
+  for (const token of queryTokens) {
+    if (haystack.includes(token)) score += chunk.keywords?.includes(token) ? 3 : 1;
+  }
+  if (chunk.sourceType === 'memory') score += 0.2;
+  if (chunk.sourceType === 'identity') score += 0.1;
+  return score;
+}
+
+export function retrieveRelevantKnowledge(
+  knowledgeChunks: KnowledgeChunk[] | undefined,
+  userInputText: string,
+  conversationHistory: { role: 'user' | 'model'; content: string }[],
+  limit = 8,
+): KnowledgeChunk[] {
+  const historyText = conversationHistory.slice(-4).map(item => item.content).join(' ');
+  const queryTokens = [...new Set(tokenize(`${userInputText} ${historyText}`))];
+  const chunks = (knowledgeChunks || []).map(chunk => ({ chunk, score: scoreChunk(chunk, queryTokens) }));
+  const ranked = chunks
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(item => item.chunk);
+
+  if (ranked.length) return ranked;
+  return (knowledgeChunks || []).slice(0, Math.min(limit, knowledgeChunks?.length || 0));
+}
+
+export function buildProfileEvidence(profile: Partial<LovedOne> & { memorySnippets?: string[] }): string[] {
+  const chunks = buildKnowledgeChunks(profile);
+  return chunks.map(chunk => `${chunk.sourceName}: ${chunk.text}`).slice(0, 40);
+}
+
+export interface PersonaGenerationInput {
+  lovedOneName: string;
+  textDocuments?: string[];
+  imageDataUris?: string[];
+  videoDataUris?: string[];
+  audioDataUris?: string[];
+  artifacts?: PersonaArtifact[];
+}
+
+export interface PersonaGenerationOutput {
+  personalityTraits: string[];
+  keyBeliefs: string[];
+  speakingStyle: { tone: string; commonPhrases: string[]; cadenceDescription: string; };
+  overallSummary: string;
+  exampleDialogues: string[];
+}
+
+export async function speakPersona(input: PersonaGenerationInput): Promise<PersonaGenerationOutput> {
+  const evidence = [
+    ...(input.textDocuments || []),
+    ...((input.artifacts || []).flatMap(artifact => [
+      artifact.userContext ? `${artifact.name} context: ${artifact.userContext}` : '',
+      artifact.extractedText ? `${artifact.name} extracted text: ${artifact.extractedText}` : '',
+      artifact.analysis ? `${artifact.name} analysis: ${artifact.analysis}` : '',
+      artifact.transcript ? `${artifact.name} transcript: ${artifact.transcript}` : '',
+    ]).filter(Boolean)),
+  ].join('\n');
+
+  const prompt = `You are building a grounded memorial profile for ${input.lovedOneName}.
+Use only the evidence below. Do not invent facts.
+Return strict JSON:
+{
+  "personalityTraits": ["4 to 6 grounded traits"],
+  "keyBeliefs": ["3 to 5 grounded values or priorities"],
+  "speakingStyle": {
+    "tone": "brief description",
+    "commonPhrases": ["short phrases actually supported by evidence"],
+    "cadenceDescription": "brief style notes"
+  },
+  "overallSummary": "2 to 4 sentence biography grounded in evidence",
+  "exampleDialogues": ["3 short first-person lines that sound like the person"]
+}
+Evidence:
+${evidence || '(none)'}`;
+
+  const raw = await ollamaGenerate(prompt, { format: 'json', numPredict: 220 });
   if (raw) {
     try {
       const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
       return {
-        personalityTraits: parsed.personalityTraits?.length ? parsed.personalityTraits : ['Warm','Loving'],
+        personalityTraits: parsed.personalityTraits?.length ? parsed.personalityTraits : ['Caring', 'Warm'],
         keyBeliefs: parsed.keyBeliefs?.length ? parsed.keyBeliefs : ['Family first'],
-        speakingStyle: { tone: parsed.speakingStyle?.tone || 'Gentle', commonPhrases: parsed.speakingStyle?.commonPhrases || [], cadenceDescription: parsed.speakingStyle?.cadenceDescription || 'Natural' },
-        overallSummary: parsed.overallSummary || 'Remembered with love.',
-        exampleDialogues: parsed.exampleDialogues?.length ? parsed.exampleDialogues : ['I am here with you.'],
+        speakingStyle: {
+          tone: parsed.speakingStyle?.tone || 'Warm and familiar',
+          commonPhrases: parsed.speakingStyle?.commonPhrases || [],
+          cadenceDescription: parsed.speakingStyle?.cadenceDescription || 'Gentle, natural pace',
+        },
+        overallSummary: parsed.overallSummary || `${input.lovedOneName} is remembered through the family stories saved here.`,
+        exampleDialogues: parsed.exampleDialogues?.length ? parsed.exampleDialogues : ['I am glad you are here with me.'],
       };
     } catch {}
   }
+
   return {
-    personalityTraits: ['Caring'], keyBeliefs: ['Family mattered.'],
-    speakingStyle: { tone: 'Warm', commonPhrases: [], cadenceDescription: 'Gentle' },
-    overallSummary: 'Remembered through stories.',
-    exampleDialogues: ['Tell me what you remember.'],
+    personalityTraits: ['Caring', 'Warm'],
+    keyBeliefs: ['Family first'],
+    speakingStyle: { tone: 'Warm and familiar', commonPhrases: [], cadenceDescription: 'Gentle, natural pace' },
+    overallSummary: `${input.lovedOneName} is remembered through the family stories saved here.`,
+    exampleDialogues: ['I am glad you are here with me.'],
   };
 }
 
-/* ---------- Persona conversation (unchanged) ---------- */
 export interface ConversationInput {
   personaId: string;
-  personaContext: { name: string; summary: string; traits: string[]; phrases: string[]; sourceEvidence?: string[]; voiceProfile?: any; voiceSampleDataUri?: string; };
-  userInputText: string; conversationHistory: { role: 'user'|'model'; content: string }[];
-}
-export async function converseWithPersona(input: ConversationInput): Promise<{ responseText: string }> {
-  const evidence = (input.personaContext.sourceEvidence || []).map((e,i) => `[${i+1}] ${e}`).join('\n');
-  const history = input.conversationHistory.slice(-6).map(e => `${e.role==='user'?'User':input.personaContext.name}: ${e.content}`).join('\n');
-  const prompt = `You are the Echo of ${input.personaContext.name}. Speak in first person.
-Persona: ${input.personaContext.summary} Traits: ${input.personaContext.traits.join(', ')} Phrases: ${input.personaContext.phrases.join(', ') || 'none'}
-Evidence: ${evidence || 'No detailed evidence – ask for more memories.'}
-Conversation: ${history || '(new)'}
-User says: "${input.userInputText}"
-Respond with 1-2 short, warm sentences. If you don't know, say you don't recall and ask a gentle question.`;
-  const res = await ollamaChat(prompt);
-  return { responseText: res || "I'm here, listening." };
+  personaContext: {
+    name: string;
+    summary: string;
+    traits: string[];
+    phrases: string[];
+    sourceEvidence?: string[];
+    voiceProfile?: any;
+    voiceSampleDataUri?: string;
+    knowledgeChunks?: KnowledgeChunk[];
+  };
+  userInputText: string;
+  conversationHistory: { role: 'user' | 'model'; content: string }[];
 }
 
-/* ---------- Voicebox TTS integration (via bridge) ---------- */
-const BRIDGE_BASE = 'http://localhost:3001'; // Our bridge server
+export async function converseWithPersona(input: ConversationInput): Promise<{ responseText: string; evidenceUsed: string[] }> {
+  const retrieved = retrieveRelevantKnowledge(input.personaContext.knowledgeChunks, input.userInputText, input.conversationHistory);
+  const evidenceText = retrieved.map((chunk, index) => `[${index + 1}] (${chunk.sourceType}/${chunk.sourceName}) ${chunk.text}`).join('\n');
+  const history = input.conversationHistory
+    .slice(-4)
+    .map(entry => `${entry.role === 'user' ? 'User' : input.personaContext.name}: ${entry.content}`)
+    .join('\n');
 
-let audioCtx: AudioContext | null = null;
-function ensureAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const prompt = `You are the Echo of ${input.personaContext.name}. Speak in first person, warmly, and briefly.
+You must answer only from the evidence below.
+If the evidence is missing, uncertain, or does not support an answer, say you do not remember that detail and ask a gentle follow-up.
+Never make up events, relationships, places, or preferences.
+Keep the reply to 1 or 2 short sentences.
+
+Evidence:
+${evidenceText || '(no evidence found)'}
+
+Conversation:
+${history || '(new conversation)'}
+
+User says: "${input.userInputText}"`;
+
+  const responseText = await ollamaGenerate(prompt, {
+    temperature: 0.15,
+    numPredict: 90,
+  });
+
+  return {
+    responseText: responseText || "I don't remember enough about that yet. Tell me a little more.",
+    evidenceUsed: retrieved.map(chunk => chunk.text),
+  };
 }
 
 export async function cloneVoice(file: File, profileName?: string): Promise<string | null> {
@@ -157,6 +493,11 @@ export async function deleteVoiceboxProfile(profileId: string): Promise<boolean>
   }
 }
 
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
 async function playVoiceboxTTS(text: string, voiceboxProfileId: string, onStart?:()=>void, onEnd?:()=>void): Promise<boolean> {
   try {
     const res = await fetch(`${BRIDGE_BASE}/speak`, {
@@ -164,34 +505,49 @@ async function playVoiceboxTTS(text: string, voiceboxProfileId: string, onStart?
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, voice: voiceboxProfileId }),
     });
-    if (!res.ok) {
-      console.error('Bridge /speak failed', res.status);
-      return false;
-    }
+    if (!res.ok) return false;
     const arrayBuffer = await res.arrayBuffer();
-    ensureAudio(); if (!audioCtx) return false;
+    ensureAudio();
+    if (!audioCtx) return false;
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    const source = audioCtx.createBufferSource(); source.buffer = audioBuffer; source.connect(audioCtx.destination);
-    source.onended = () => onEnd?.(); source.start(); onStart?.();
+    const source = audioCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioCtx.destination);
+    source.onended = () => onEnd?.();
+    source.start();
+    onStart?.();
     return true;
-  } catch (e) {
-    console.error('playVoiceboxTTS error:', e);
+  } catch {
     return false;
   }
 }
 
 function speakBrowserFallback(text: string, onStart?:()=>void, onEnd?:()=>void) {
-  if (typeof window==='undefined' || !('speechSynthesis' in window)) return;
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text); u.rate=0.9; u.pitch=1; u.volume=1;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 0.92;
+  utterance.pitch = 1;
+  utterance.volume = 1;
   const voices = window.speechSynthesis.getVoices();
-  const pref = voices.find(v => v.lang.startsWith('en') && /Google US English|Samantha|Ava|Allison/i.test(v.name)) || voices.find(v => v.lang.startsWith('en'));
-  if (pref) u.voice = pref;
-  u.onstart = () => onStart?.(); u.onend = () => onEnd?.(); u.onerror = () => onEnd?.();
-  window.speechSynthesis.speak(u);
+  const preferred = voices.find(voice => voice.lang.startsWith('en') && /Google US English|Samantha|Ava|Allison/i.test(voice.name))
+    || voices.find(voice => voice.lang.startsWith('en'));
+  if (preferred) utterance.voice = preferred;
+  utterance.onstart = () => onStart?.();
+  utterance.onend = () => onEnd?.();
+  utterance.onerror = () => onEnd?.();
+  window.speechSynthesis.speak(utterance);
 }
 
-export function initAudioContext() { ensureAudio(); }
+export function initAudioContext() {
+  ensureAudio();
+}
+
+export async function warmVoiceAndLanguageModels() {
+  try {
+    await fetch(`${BRIDGE_BASE}/warmup`, { method: 'POST' });
+  } catch {}
+}
 
 export async function speakWithBrowserTTS(
   text: string,

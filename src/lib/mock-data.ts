@@ -24,6 +24,7 @@ export interface LovedOne {
   };
   inferenceNotes?: string[];
   sourceEvidence?: string[];
+  knowledgeChunks?: KnowledgeChunk[];
 }
 
 export interface PersonaArtifact {
@@ -36,6 +37,14 @@ export interface PersonaArtifact {
   analysis?: string;
   size?: number;
   mimeType?: string;
+}
+
+export interface KnowledgeChunk {
+  id: string;
+  text: string;
+  sourceType: 'identity' | 'memory' | 'image' | 'video' | 'audio' | 'document' | 'inference';
+  sourceName: string;
+  keywords?: string[];
 }
 
 /**
