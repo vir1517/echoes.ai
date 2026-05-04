@@ -132,7 +132,7 @@ app.post('/upload-voice', upload.single('file'), async (req, res) => {
         description: `Created from Echoes profile upload: ${req.file.originalname}`,
         language: 'en',
         voice_type: 'cloned',
-        default_engine: 'chatterbox_turbo'
+        default_engine: engine || 'chatterbox_turbo'
       })
     });
     if (!createResp.ok) {
@@ -209,7 +209,7 @@ app.delete('/voice-profile/:profileId', async (req, res) => {
 // ── TTS generation (polling for completed audio) ─────────
 app.post('/speak', async (req, res) => {
   try {
-    const { text, voice } = req.body;
+    const { text, voice, engine } = req.body;
     if (!text || !voice) return res.status(400).json({ error: 'Missing text or voice' });
 
     console.log(`[bridge] generating speech for profile: ${voice}`);
@@ -221,7 +221,7 @@ app.post('/speak', async (req, res) => {
         text,
         profile_id: voice,
         language: 'en',
-        engine: 'chatterbox_turbo',
+        engine: engine || 'chatterbox_turbo',
         normalize: true
       })
     });

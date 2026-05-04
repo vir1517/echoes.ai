@@ -21,6 +21,7 @@
     "mammoth": "^1.12.0",
     "next": "15.5.9",
     "pdfjs-dist": "^5.7.284",
+    "puter": "^1.0.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "tailwind-merge": "^3.0.1",

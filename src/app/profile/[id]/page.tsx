@@ -3,7 +3,7 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
-import { Mic, ArrowLeft, Share2, Calendar, MapPin, Sparkles, BookOpen, Quote, Volume2, Pencil, Trash2 } from "lucide-react";
+import { Mic, ArrowLeft, Share2, Calendar, MapPin, Sparkles, BookOpen, Quote, Volume2, Pencil, Trash2, StopCircle } from "lucide-react";
 import Image from 'next/image';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EchoOrb } from '@/components/echo-orb';
@@ -17,26 +17,22 @@ export default function ProfileDetail() {
   const { id } = useParams();
   const router = useRouter();
   const { toast } = useToast();
-
   const [person, setPerson] = useState<LovedOne | null>(null);
   const [activeTab, setActiveTab] = useState("story");
-  const [orbState, setOrbState] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
+  const [orbState, setOrbState] = useState<'idle'|'listening'|'thinking'|'speaking'>('idle');
   const [lastResponse, setLastResponse] = useState<string | null>(null);
-  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'model'; content: string }[]>([]);
-
+  const [chatHistory, setChatHistory] = useState<{role:'user'|'model';content:string}[]>([]);
+  const [transcript, setTranscript] = useState<{who:'you'|'them';text:string}[]>([]);
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     (async () => {
       const found = await getProfileById(id as string);
       if (found) {
-        if (!found.knowledgeChunks?.length) {
-          found.knowledgeChunks = buildKnowledgeChunks({
-            ...found,
-            memorySnippets: (found as any).memorySnippets || [],
-          });
-        }
-        if (!found.sourceEvidence) found.sourceEvidence = buildProfileEvidence(found as any);
+        if (!found.knowledgeChunks?.length)
+          found.knowledgeChunks = buildKnowledgeChunks({ ...found, memorySnippets: (found as any).memorySnippets || [] });
+        if (!found.sourceEvidence)
+          found.sourceEvidence = buildProfileEvidence(found as any);
         setPerson(found);
       } else {
         toast({ title: "Profile not found", variant: "destructive" });
@@ -45,21 +41,18 @@ export default function ProfileDetail() {
     })();
   }, [id, router, toast]);
 
-  useEffect(() => {
-    warmVoiceAndLanguageModels();
-  }, []);
+  useEffect(() => { warmVoiceAndLanguageModels(); }, []);
 
   const handleAIResponse = useCallback(async (text: string) => {
     if (!person) return;
     setOrbState('thinking');
+    setTranscript(prev => [...prev, { who: 'you', text }]);
     try {
       const result = await converseWithPersona({
         personaId: person.id,
         personaContext: {
-          name: person.name,
-          summary: person.summary,
-          traits: person.traits || [],
-          phrases: person.phrases || [],
+          name: person.name, summary: person.summary,
+          traits: person.traits || [], phrases: person.phrases || [],
           sourceEvidence: person.sourceEvidence || [],
           voiceProfile: person.voiceProfile,
           voiceSampleDataUri: person.voiceSampleDataUri,
@@ -68,14 +61,12 @@ export default function ProfileDetail() {
         userInputText: text,
         conversationHistory: chatHistory,
       });
-
       setLastResponse(result.responseText);
-      setChatHistory(prev => [
-        ...prev,
+      setTranscript(prev => [...prev, { who: 'them', text: result.responseText }]);
+      setChatHistory(prev => [...prev,
         { role: 'user', content: text },
         { role: 'model', content: result.responseText }
       ]);
-
       await speakWithBrowserTTS(result.responseText, person.voiceSampleDataUri, {
         onStart: () => setOrbState('speaking'),
         onEnd: () => setOrbState('idle'),
@@ -83,148 +74,279 @@ export default function ProfileDetail() {
     } catch (err) {
       console.error(err);
       setOrbState('idle');
-      toast({ title: "Connection Interrupted", variant: "destructive" });
+      toast({ title: "Connection interrupted", variant: "destructive" });
     }
   }, [person, chatHistory, toast]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        recognition.lang = 'en-US';
-        recognition.onstart = () => setOrbState('listening');
-        recognition.onresult = (event: any) => {
-          const transcript = event.results[0][0].transcript;
-          if (transcript) handleAIResponse(transcript);
-        };
-        recognition.onerror = (event: any) => {
-          console.error(event.error);
-          setOrbState('idle');
-          if (event.error === 'not-allowed') toast({ title: "Microphone Access Denied", variant: "destructive" });
-        };
-        recognition.onend = () => setOrbState(prev => (prev === 'listening' ? 'idle' : prev));
-        recognitionRef.current = recognition;
-      }
-    }
-    return () => { recognitionRef.current?.stop(); window.speechSynthesis.cancel(); };
+    if (typeof window === 'undefined') return;
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const r = new SR();
+    r.continuous = false; r.interimResults = false; r.lang = 'en-US';
+    r.onstart = () => setOrbState('listening');
+    r.onresult = (e: any) => { const t = e.results[0][0].transcript; if (t) handleAIResponse(t); };
+    r.onerror = (e: any) => { setOrbState('idle'); if (e.error === 'not-allowed') toast({ title: "Microphone denied", variant: "destructive" }); };
+    r.onend = () => setOrbState(p => p === 'listening' ? 'idle' : p);
+    recognitionRef.current = r;
+    return () => { r.stop(); window.speechSynthesis?.cancel(); };
   }, [handleAIResponse, toast]);
 
   const handleSpeak = () => {
-    // Initialize audio context on first user gesture
     initAudioContext();
-
-    if (orbState === 'speaking') {
-      // Stop any ongoing TTS
-      window.speechSynthesis.cancel();
-      setOrbState('idle');
-      return;
-    }
-    if (orbState === 'listening') {
-      recognitionRef.current?.stop();
-    } else {
-      if (!recognitionRef.current) {
-        toast({ title: "Speech Not Supported", description: "Your browser doesn't support voice recognition.", variant: "destructive" });
-        return;
-      }
-      setOrbState('listening');
-      recognitionRef.current.start();
-    }
+    if (orbState === 'speaking') { window.speechSynthesis?.cancel(); setOrbState('idle'); return; }
+    if (orbState === 'listening') { recognitionRef.current?.stop(); return; }
+    if (!recognitionRef.current) { toast({ title: "Voice not supported", variant: "destructive" }); return; }
+    setOrbState('listening');
+    recognitionRef.current.start();
   };
 
   const handleDelete = async () => {
-    if (!person) return;
-    if (!confirm(`Delete ${person.name}'s Echo?`)) return;
+    if (!person || !confirm(`Remove ${person.name}'s Echo?`)) return;
     if (person.voiceSampleDataUri) {
-      const voiceDeleted = await deleteVoiceboxProfile(person.voiceSampleDataUri);
-      if (!voiceDeleted) {
-        toast({ title: "Voicebox Delete Failed", description: "The Echo was not deleted because its cloned voice profile could not be removed.", variant: "destructive" });
-        return;
-      }
+      const ok = await deleteVoiceboxProfile(person.voiceSampleDataUri);
+      if (!ok) { toast({ title: "Voice delete failed", variant: "destructive" }); return; }
     }
-    const deleted = await deleteProfile(person.id);
-    if (deleted) {
-      toast({ title: "Echo Deleted" });
-      router.push('/');
-    } else {
-      toast({ title: "Delete Failed", variant: "destructive" });
-    }
+    const ok = await deleteProfile(person.id);
+    if (ok) { toast({ title: "Echo removed" }); router.push('/'); }
+    else toast({ title: "Delete failed", variant: "destructive" });
   };
 
-  if (!person) return <div className="min-h-screen flex items-center justify-center"><div className="w-20 h-20 border-4 border-accent/20 border-t-accent rounded-full animate-spin" /></div>;
+  if (!person) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="w-12 h-12 border-2 border-accent/20 border-t-accent rounded-full animate-spin" />
+    </div>
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <header className="h-24 px-8 flex items-center justify-between glass sticky top-0 z-50">
-        <div className="flex items-center gap-8">
-          <Button variant="ghost" size="icon" onClick={() => router.push('/')} className="rounded-full bg-white/5 border border-white/5 hover:bg-accent/10 hover:text-accent"><ArrowLeft className="w-5 h-5" /></Button>
-          <div><h2 className="font-bold text-2xl tracking-tight text-white">{person.name}</h2><span className="text-[10px] font-bold text-accent uppercase tracking-[0.3em]">{person.relation}</span></div>
+
+      {/* ambient */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-0 right-0 w-[40vw] h-[40vw] rounded-full opacity-30"
+          style={{background:'radial-gradient(circle, hsla(175,60%,55%,0.05) 0%, transparent 70%)'}} />
+      </div>
+
+      {/* header */}
+      <header className="glass sticky top-0 z-50 h-18 px-6 flex items-center justify-between h-16">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.push('/')}
+            className="rounded-full bg-white/5 border border-white/8 hover:bg-accent/10 hover:text-accent w-9 h-9">
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <div>
+            <h2 className="text-lg text-white/90 leading-tight" style={{fontFamily:'Cormorant Garamond, serif', fontWeight:300}}>
+              {person.name}
+            </h2>
+            <span className="text-[9px] uppercase tracking-[0.35em] text-accent/60">{person.relation}</span>
+          </div>
         </div>
-        <div className="flex gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.push(`/profile/new?edit=${person.id}`)} className="rounded-full bg-white/5 border border-white/5 hover:text-accent"><Pencil className="w-5 h-5" /></Button>
-          <Button variant="ghost" size="icon" onClick={handleDelete} className="rounded-full bg-white/5 border border-white/5 hover:text-destructive"><Trash2 className="w-5 h-5" /></Button>
-          <Button variant="ghost" size="icon" className="rounded-full bg-white/5 border border-white/5 hover:text-accent"><Share2 className="w-5 h-5" /></Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" size="icon" onClick={() => router.push(`/profile/new?edit=${person.id}`)}
+            className="w-8 h-8 rounded-full bg-white/5 border border-white/8 hover:text-accent"><Pencil className="w-3.5 h-3.5" /></Button>
+          <Button variant="ghost" size="icon" onClick={handleDelete}
+            className="w-8 h-8 rounded-full bg-white/5 border border-white/8 hover:text-destructive"><Trash2 className="w-3.5 h-3.5" /></Button>
+          <Button variant="ghost" size="icon"
+            className="w-8 h-8 rounded-full bg-white/5 border border-white/8 hover:text-accent"><Share2 className="w-3.5 h-3.5" /></Button>
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col overflow-hidden">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex-1 flex flex-col">
-          <div className="flex justify-center py-8 glass bg-white/[0.01]">
-            <TabsList className="bg-white/5 rounded-full p-1.5 border border-white/5 h-14">
-              <TabsTrigger value="story" className="rounded-full px-10 h-full data-[state=active]:bg-primary data-[state=active]:text-white transition-all text-xs font-bold uppercase tracking-widest"><BookOpen className="w-4 h-4 mr-3" /> Their Story</TabsTrigger>
-              <TabsTrigger value="speak" className="rounded-full px-10 h-full data-[state=active]:bg-accent data-[state=active]:text-accent-foreground transition-all text-xs font-bold uppercase tracking-widest"><Sparkles className="w-4 h-4 mr-3" /> Speak With Them</TabsTrigger>
-            </TabsList>
-          </div>
+      {/* tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+        <div className="flex justify-center pt-6 pb-2">
+          <TabsList className="bg-white/5 rounded-full p-1 border border-white/8 h-11 gap-1">
+            <TabsTrigger value="story"
+              className="rounded-full px-8 h-full data-[state=active]:bg-white/10 data-[state=active]:text-white text-xs font-light uppercase tracking-[0.2em] transition-all gap-2">
+              <BookOpen className="w-3.5 h-3.5" />Story
+            </TabsTrigger>
+            <TabsTrigger value="speak"
+              className="rounded-full px-8 h-full data-[state=active]:bg-accent data-[state=active]:text-accent-foreground text-xs font-light uppercase tracking-[0.2em] transition-all gap-2">
+              <Sparkles className="w-3.5 h-3.5" />Speak
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-          <TabsContent value="story" className="flex-1 max-w-7xl mx-auto w-full px-10 py-20 animate-in fade-in slide-in-from-bottom-6 duration-1000">
-            <div className="grid lg:grid-cols-12 gap-20">
-              <div className="lg:col-span-4 space-y-16">
-                <div className="relative aspect-[3/4] rounded-[3.5rem] overflow-hidden border-2 border-primary shadow-[0_0_80px_rgba(0,0,0,0.6)] group">
-                  <Image src={person.avatarUrl} alt={person.name} fill className="object-cover grayscale group-hover:grayscale-0 transition-all duration-1000 scale-105 group-hover:scale-100" data-ai-hint="portrait elderly" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent opacity-60" />
-                </div>
-                <div className="space-y-10 bg-white/[0.02] p-10 rounded-[3rem] border border-white/5">
-                  <div className="space-y-6"><h3 className="text-xs font-bold uppercase tracking-[0.3em] text-accent flex items-center gap-3"><Sparkles className="w-4 h-4" /> The Snapshot</h3><div className="space-y-5"><div className="flex items-center gap-4 text-muted-foreground"><Calendar className="w-5 h-5 text-primary" /><span>{person.birthYear} — {person.passingYear}</span></div><div className="flex items-center gap-4 text-muted-foreground"><MapPin className="w-5 h-5 text-primary" /><span>{person.birthPlace}</span></div></div></div>
-                  <div className="space-y-6"><h3 className="text-xs font-bold uppercase tracking-[0.3em] text-accent">Personality Traits</h3><div className="flex flex-wrap gap-2.5">{(person.traits || []).map(trait => <span key={trait} className="text-[10px] px-4 py-1.5 rounded-full bg-primary/20 text-white/70 border border-white/10 uppercase font-bold">{trait}</span>)}</div></div>
-                </div>
+        {/* ── STORY TAB ── */}
+        <TabsContent value="story" className="flex-1 overflow-y-auto">
+          <div className="max-w-5xl mx-auto px-6 py-12 grid lg:grid-cols-12 gap-16">
+
+            {/* left col */}
+            <div className="lg:col-span-4 space-y-8">
+              {/* portrait */}
+              <div className="relative rounded-2xl overflow-hidden border border-white/8 shadow-2xl group aspect-[3/4]">
+                <Image src={person.avatarUrl} alt={person.name} fill
+                  className="object-cover grayscale group-hover:grayscale-0 transition-all duration-1000 scale-105 group-hover:scale-100" />
+                <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent" />
               </div>
-              <div className="lg:col-span-8 space-y-20">
-                <section className="space-y-10 relative"><Quote className="absolute -top-10 -left-12 w-24 h-24 text-accent/5 -z-10" /><h3 className="text-xs font-bold uppercase tracking-[0.3em] text-accent">AI Biography</h3><p className="text-2xl font-medium leading-relaxed text-white/90 italic first-letter:text-6xl first-letter:font-bold first-letter:mr-4 first-letter:float-left first-letter:text-accent">{person.summary}</p></section>
-                {person.beliefs?.length > 0 && (
-                  <section className="space-y-10"><h3 className="text-xs font-bold uppercase tracking-[0.3em] text-accent">Core Values</h3><div className="grid gap-5">{person.beliefs.map((belief, idx) => (<div key={idx} className="p-8 bg-white/[0.02] rounded-[2rem] border border-white/5 flex gap-6 items-start group hover:bg-white/[0.04] transition-all duration-500"><div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center text-accent shrink-0 text-xs font-bold">{idx+1}</div><p className="text-xl text-white/80 font-medium">{belief}</p></div>))}</div></section>
-                )}
-                {person.phrases?.length > 0 && (
-                  <section className="space-y-10"><h3 className="text-xs font-bold uppercase tracking-[0.3em] text-accent">Common Phrases</h3><div className="flex flex-wrap gap-5">{person.phrases.map((phrase, idx) => (<div key={idx} className="px-8 py-5 bg-primary/10 rounded-[2rem] border border-primary/20 italic text-white/60 text-lg hover:text-white transition-colors cursor-default">"{phrase}"</div>))}</div></section>
-                )}
+
+              {/* snapshot */}
+              <div className="space-y-5 p-6 rounded-2xl bg-white/[0.02] border border-white/5">
+                <p className="text-[9px] uppercase tracking-[0.4em] text-accent/60">The Snapshot</p>
+                <div className="space-y-3 text-sm text-muted-foreground font-light">
+                  <div className="flex items-center gap-3">
+                    <Calendar className="w-4 h-4 text-white/20 shrink-0" />
+                    <span>{person.birthYear} — {person.passingYear}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <MapPin className="w-4 h-4 text-white/20 shrink-0" />
+                    <span>{person.birthPlace}</span>
+                  </div>
+                </div>
+                {/* traits */}
+                <div className="pt-2 flex flex-wrap gap-2">
+                  {(person.traits || []).map(t => (
+                    <span key={t} className="text-[9px] px-3 py-1 rounded-full border border-white/8 text-white/30 uppercase tracking-wider font-light">{t}</span>
+                  ))}
+                </div>
               </div>
             </div>
-          </TabsContent>
 
-          <TabsContent value="speak" className="flex-1 flex flex-col items-center justify-center relative animate-in zoom-in-95 duration-1000 overflow-hidden">
-            <div className="absolute inset-0 pointer-events-none"><div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-accent/5 rounded-full blur-[200px] opacity-40 animate-pulse-slow" /></div>
-            <div className="z-10 flex flex-col items-center gap-12 max-w-3xl text-center px-10">
-              <EchoOrb state={orbState} />
-              <div className="h-48 flex items-center justify-center w-full">
-                {orbState === 'idle' && <p className="text-muted-foreground/40 text-sm tracking-[0.4em] uppercase font-bold animate-pulse">Tap the microphone to speak</p>}
-                {orbState === 'listening' && <div className="flex flex-col items-center gap-6"><p className="text-accent text-2xl font-bold tracking-[0.3em] uppercase"><span className="w-3 h-3 rounded-full bg-accent animate-ping" /> Listening</p></div>}
-                {orbState === 'thinking' && <div className="flex flex-col items-center gap-6"><p className="text-muted-foreground italic text-2xl font-medium">Recalling memories...</p><div className="flex gap-2"><div className="w-2.5 h-2.5 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]" /><div className="w-2.5 h-2.5 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]" /><div className="w-2.5 h-2.5 bg-primary rounded-full animate-bounce" /></div></div>}
-                {orbState === 'speaking' && lastResponse && <div className="flex flex-col items-center gap-6"><p className="text-4xl text-white/95 font-medium italic leading-relaxed animate-in fade-in slide-in-from-bottom-8 duration-1000 max-w-2xl">"{lastResponse}"</p><div className="flex items-center gap-3 text-accent/40"><Volume2 className="w-4 h-4" /><span className="text-[10px] font-bold uppercase tracking-[0.3em]">Speaking</span></div></div>}
+            {/* right col */}
+            <div className="lg:col-span-8 space-y-14">
+              {/* biography */}
+              <section className="space-y-6 relative">
+                <Quote className="absolute -top-6 -left-8 w-16 h-16 text-accent/5" />
+                <p className="text-[9px] uppercase tracking-[0.4em] text-accent/60">Biography</p>
+                <p className="text-xl leading-relaxed text-white/75 font-light"
+                  style={{fontFamily:'Cormorant Garamond, serif'}}>
+                  {person.summary}
+                </p>
+              </section>
+
+              {/* beliefs */}
+              {person.beliefs?.length > 0 && (
+                <section className="space-y-6">
+                  <p className="text-[9px] uppercase tracking-[0.4em] text-accent/60">Core Values</p>
+                  <div className="grid gap-3">
+                    {person.beliefs.map((b, i) => (
+                      <div key={i} className="flex gap-4 items-start p-5 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] transition-all group">
+                        <span className="text-xs text-accent/40 font-light mt-0.5 shrink-0">{String(i+1).padStart(2,'0')}</span>
+                        <p className="text-base text-white/65 font-light leading-relaxed">{b}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* phrases */}
+              {person.phrases?.length > 0 && (
+                <section className="space-y-6">
+                  <p className="text-[9px] uppercase tracking-[0.4em] text-accent/60">Common Phrases</p>
+                  <div className="flex flex-wrap gap-3">
+                    {person.phrases.map((p, i) => (
+                      <div key={i} className="px-5 py-3 rounded-xl border border-white/8 text-white/45 font-light italic text-sm hover:text-white/70 transition-colors cursor-default"
+                        style={{fontFamily:'Cormorant Garamond, serif'}}>
+                        "{p}"
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* ── SPEAK TAB ── */}
+        <TabsContent value="speak" className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full px-6 py-8 gap-6">
+
+            {/* conversation transcript */}
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-hide min-h-0">
+              {transcript.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center gap-3 opacity-40">
+                  <p className="text-sm font-light text-muted-foreground">Press the microphone and speak</p>
+                  <p className="text-xs font-light text-muted-foreground/60">
+                    {person.name} is listening...
+                  </p>
+                </div>
+              ) : (
+                transcript.map((line, i) => (
+                  <div key={i} className={cn("flex gap-3 animate-in fade-in slide-in-from-bottom-2 duration-500",
+                    line.who === 'you' ? "justify-end" : "justify-start")}>
+                    {line.who === 'them' && (
+                      <div className="w-7 h-7 rounded-full overflow-hidden border border-white/10 shrink-0 mt-1">
+                        <Image src={person.avatarUrl} alt="" width={28} height={28} className="object-cover grayscale" />
+                      </div>
+                    )}
+                    <div className={cn("max-w-[75%] px-4 py-3 rounded-2xl text-sm font-light leading-relaxed",
+                      line.who === 'you'
+                        ? "bg-white/8 text-white/70 rounded-tr-sm"
+                        : "bg-accent/8 border border-accent/10 text-white/80 rounded-tl-sm"
+                    )}
+                      style={line.who === 'them' ? {fontFamily:'Cormorant Garamond, serif', fontSize:'1rem'} : {}}>
+                      {line.text}
+                    </div>
+                  </div>
+                ))
+              )}
+
+              {/* live state indicator */}
+              {orbState === 'thinking' && (
+                <div className="flex gap-3 justify-start animate-in fade-in duration-300">
+                  <div className="w-7 h-7 rounded-full overflow-hidden border border-white/10 shrink-0">
+                    <Image src={person.avatarUrl} alt="" width={28} height={28} className="object-cover grayscale" />
+                  </div>
+                  <div className="px-4 py-3 rounded-2xl rounded-tl-sm bg-accent/8 border border-accent/10">
+                    <div className="flex gap-1 items-center">
+                      <div className="w-1.5 h-1.5 bg-accent/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                      <div className="w-1.5 h-1.5 bg-accent/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                      <div className="w-1.5 h-1.5 bg-accent/60 rounded-full animate-bounce" />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* orb + mic */}
+            <div className="flex flex-col items-center gap-6 pt-4 border-t border-white/5">
+              <EchoOrb state={orbState} className="scale-75 -my-4" />
+
+              {/* status text */}
+              <div className="h-6 flex items-center justify-center">
+                {orbState === 'idle' && (
+                  <p className="text-[10px] uppercase tracking-[0.4em] text-muted-foreground/30 font-light animate-pulse">
+                    tap to speak
+                  </p>
+                )}
+                {orbState === 'listening' && (
+                  <div className="flex items-center gap-2 text-accent">
+                    <div className="w-1.5 h-1.5 rounded-full bg-accent animate-ping-slow" />
+                    <span className="text-[10px] uppercase tracking-[0.4em] font-light">Listening</span>
+                  </div>
+                )}
+                {orbState === 'thinking' && (
+                  <p className="text-[10px] uppercase tracking-[0.4em] text-muted-foreground/50 font-light">Recalling...</p>
+                )}
+                {orbState === 'speaking' && (
+                  <div className="flex items-center gap-2 text-accent/60">
+                    <Volume2 className="w-3 h-3" />
+                    <span className="text-[10px] uppercase tracking-[0.4em] font-light">Speaking</span>
+                  </div>
+                )}
               </div>
-              <button onClick={handleSpeak} disabled={orbState === 'thinking'} className={cn(
-                "w-32 h-32 rounded-full flex items-center justify-center transition-all duration-700 border-2 relative group",
-                orbState === 'listening' ? "bg-accent border-accent text-accent-foreground scale-110 shadow-[0_0_100px_rgba(82,224,224,0.6)]" :
-                orbState === 'speaking' ? "bg-accent/20 border-accent/40 text-accent hover:bg-accent/30" :
-                "bg-white/5 border-white/10 text-white hover:bg-white/10 hover:scale-110 hover:border-accent/30"
-              )}>
-                <div className={cn("absolute inset-0 rounded-full border border-accent animate-ping opacity-0", orbState === 'listening' && "opacity-40")} />
-                <Mic className={cn("w-14 h-14 transition-all duration-700", orbState === 'listening' && "scale-110")} />
+
+              {/* mic button */}
+              <button onClick={handleSpeak} disabled={orbState === 'thinking'}
+                className={cn(
+                  "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-500 border relative",
+                  orbState === 'listening'
+                    ? "bg-accent border-accent text-accent-foreground scale-110 shadow-[0_0_40px_hsla(175,60%,55%,0.4)]"
+                    : orbState === 'speaking'
+                    ? "bg-accent/10 border-accent/30 text-accent hover:bg-accent/20"
+                    : "bg-white/5 border-white/10 text-white/60 hover:bg-white/10 hover:border-white/20 hover:text-white hover:scale-105"
+                )}>
+                {orbState === 'listening' && (
+                  <div className="absolute inset-0 rounded-full border border-accent/40 animate-ping-slow" />
+                )}
+                {orbState === 'speaking'
+                  ? <StopCircle className="w-6 h-6" />
+                  : <Mic className={cn("w-6 h-6", orbState === 'listening' && "scale-110")} />
+                }
               </button>
             </div>
-          </TabsContent>
-        </Tabs>
-      </main>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
